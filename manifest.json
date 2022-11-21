@@ -1,0 +1,15 @@
+{
+    "name": "utwallet.ulrichard",
+    "description": "Bitcoin Wallet",
+    "architecture": "@CLICK_ARCH@",
+    "title": "utwallet",
+    "hooks": {
+        "utwallet": {
+            "apparmor": "utwallet.apparmor",
+            "desktop":  "utwallet.desktop"
+        }
+    },
+    "version": "1.0.0",
+    "maintainer": "Richard Ulrich <richi+utwallet@ulrichard.ch>",
+    "framework" : "@CLICK_FRAMEWORK@"
+}
