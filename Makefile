@@ -12,6 +12,9 @@ phone:
 	clickable install --arch arm64
 	adb kill-server
 
+logs:
+	clickable logs --arch arm64
+
 init: 
 	export PATH=$PATH:~/.local/bin
 	clickable create

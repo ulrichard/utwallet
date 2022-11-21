@@ -7,6 +7,7 @@ build = "src/build.rs"
 
 [dependencies]
 qmetaobject = "0.2.3"
+qt_core = "0.5.0"
 gettext-rs = "0.7"
 cstr = "0.2.8"
 cpp = "0.5"

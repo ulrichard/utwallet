@@ -19,6 +19,7 @@ extern crate cstr;
 extern crate cpp;
 #[macro_use]
 extern crate qmetaobject;
+use qt_core::{QStandardPaths, q_standard_paths::StandardLocation};
 
 use bdk::{
     bitcoin::{Address, Network},
@@ -178,10 +179,11 @@ impl Greeter {
     pub fn create_wallet() -> Result<Wallet<MemoryDatabase>, String> {
         // load the wallet
         let network = Network::Bitcoin;
-        let home_dir = env::var("HOME")
-            .map_err(|e| format!("Failed to read the HOME environment variable: {}", e))?;
-        let data_path = PathBuf::from(home_dir).join(".local/share/utwallet");
-        let wallet_file = data_path.join("wallet.descriptor");
+        
+        let app_data_path =  unsafe {
+			QStandardPaths::writable_location(StandardLocation::AppDataLocation)
+		};
+        let wallet_file = PathBuf::from(app_data_path.to_std_string()).join("wallet.descriptor");
 
         let descriptors: (String, String) = if wallet_file.exists() {
             let json = fs::read_to_string(&wallet_file)
@@ -241,10 +243,13 @@ fn log_err<T>(res: Result<T, String>) -> T {
     match res {
         Ok(d) => d,
         Err(err) => {
-            let home_dir = env::var("HOME").unwrap();
-            let log_path = PathBuf::from(home_dir).join(".local/share/utwallet");
-            create_dir_all(&log_path).unwrap();
-            let log_file = log_path.join("log.txt");
+			
+			let app_data_path =  unsafe {
+				QStandardPaths::writable_location(StandardLocation::AppDataLocation)
+			};
+		    let app_data_path = PathBuf::from(app_data_path.to_std_string());
+            create_dir_all(&app_data_path).unwrap();
+            let log_file = app_data_path.join("log.txt");
 
             let mut file = fs::OpenOptions::new()
                 .write(true)
