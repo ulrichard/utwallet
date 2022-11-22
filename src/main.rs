@@ -32,7 +32,7 @@ use bdk::{
     },
     miniscript,
     wallet::AddressIndex,
-    KeychainKind, SignOptions, SyncOptions, Wallet,
+    SignOptions, SyncOptions, Wallet,
 };
 use qrcode_png::{Color, QrCode, QrCodeEcc};
 use std::{env, fs, fs::File, fs::create_dir_all, io::Write, path::PathBuf, str::FromStr};
@@ -229,15 +229,8 @@ impl Greeter {
 			.map_err(|e| format!("Failed to create directory: {}", e))?;
         let mut output = File::create(wallet_file)
 			.map_err(|e| format!("Failed to create wallet file: {}", e))?;
-        let json = serde_json::to_string_pretty(&(
-            wallet
-                .get_descriptor_for_keychain(KeychainKind::External)
-                .to_string(),
-            wallet
-                .get_descriptor_for_keychain(KeychainKind::Internal)
-                .to_string(),
-        ))
-		.map_err(|e| format!("Failed to format wallet file: {}", e))?;
+        let json = serde_json::to_string_pretty(&(&descriptors.0, &descriptors.1))
+			.map_err(|e| format!("Failed to format wallet file: {}", e))?;
         write!(output, "{}", json)
 		.map_err(|e| format!("Failed to write wallet file: {}", e))?;
 
