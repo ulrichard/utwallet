@@ -50,6 +50,7 @@ struct Greeter {
     receiving_address: qt_property!(QString),
     update_balance: qt_method!(
         fn update_balance(&mut self) -> QString {
+			println!("updating balance");
             if self.wallet.is_none() {
                 self.wallet = Some(log_err(Greeter::create_wallet()));
             }
@@ -115,7 +116,7 @@ impl Greeter {
             .sign(&mut psbt, signopt)
             .map_err(|e| format!("Failed to sign the transaction: {}", e))?;
         if !finalized {
-            return Err("The tx is not finalized after signing".to_string());
+            println!("The tx is not finalized after signing");
         }
 
         // broadcast
@@ -139,7 +140,12 @@ impl Greeter {
     }
 
     fn generate_qr(&self, addr: &str) -> Result<PathBuf, String> {
-        let qr_file = PathBuf::from("/tmp/utwallet_qr.png");
+		let app_data_path =  unsafe {
+			QStandardPaths::writable_location(StandardLocation::AppDataLocation)
+		};
+	    let app_data_path = PathBuf::from(app_data_path.to_std_string());
+        create_dir_all(&app_data_path).unwrap();
+        let qr_file = app_data_path.join("receiving.png");
 
         let mut qrcode = QrCode::new(addr, QrCodeEcc::Medium)
             .map_err(|e| format!("Failed to construct a QR code: {}", e))?;
@@ -169,8 +175,8 @@ impl Greeter {
         match self.wallet.as_ref().unwrap().get_balance() {
             Ok(bal) => Ok(format!(
                 "Balance: {} (+{}) BTC",
-                bal.confirmed,
-                (bal.immature + bal.trusted_pending + bal.untrusted_pending)
+                bal.confirmed / 100_000_000,
+                (bal.immature + bal.trusted_pending + bal.untrusted_pending) / 100_000_000
             )),
             Err(e) => Err(format!("Unable to determine the balance: {:?}", e)),
         }
@@ -243,24 +249,8 @@ fn log_err<T>(res: Result<T, String>) -> T {
     match res {
         Ok(d) => d,
         Err(err) => {
-			
-			let app_data_path =  unsafe {
-				QStandardPaths::writable_location(StandardLocation::AppDataLocation)
-			};
-		    let app_data_path = PathBuf::from(app_data_path.to_std_string());
-            create_dir_all(&app_data_path).unwrap();
-            let log_file = app_data_path.join("log.txt");
-
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .append(true)
-                .open(log_file)
-                .unwrap();
-
-            let msg = format!("{}", err);
-            write!(file, "{}", msg).unwrap();
-            file.sync_all().unwrap();
-            panic!("{}", msg);
+			eprintln!("{}", err);
+            panic!("{}", err);
         }
     }
 }

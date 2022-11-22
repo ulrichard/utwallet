@@ -133,7 +133,7 @@ ApplicationWindow {
             }
             
             Timer {
-				interval: 10000; running: true; repeat: true
+				interval: 20000; running: true; repeat: true
 				onTriggered: header.title = greeter.update_balance();
 			}
         }

@@ -9,7 +9,7 @@
             "desktop":  "utwallet.desktop"
         }
     },
-    "version": "1.0.0",
+    "version": "0.0.1",
     "maintainer": "Richard Ulrich <richi+utwallet@ulrichard.ch>",
     "framework" : "@CLICK_FRAMEWORK@"
 }
