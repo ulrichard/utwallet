@@ -54,7 +54,7 @@ fn qmake_args() -> String {
 
 /// Generate gettext translation files
 fn gettext() {
-	std::fs::create_dir_all("po").unwrap();
+    std::fs::create_dir_all("po").unwrap();
     let pot_file = "po/utwallet.ulrichard.pot";
     let source_files = source_files();
 

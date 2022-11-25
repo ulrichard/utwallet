@@ -128,6 +128,16 @@ ApplicationWindow {
 				}
             }
 
+            Label {
+                id: label_receive_addr
+                text: i18n.tr('Address')
+                
+                Component.onCompleted: {
+					label_receive_addr.text = greeter.address();
+				}
+
+            }
+            
             Item {
                 Layout.fillHeight: true
             }

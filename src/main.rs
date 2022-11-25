@@ -19,7 +19,7 @@ extern crate cstr;
 extern crate cpp;
 #[macro_use]
 extern crate qmetaobject;
-use qt_core::{QStandardPaths, q_standard_paths::StandardLocation};
+use qt_core::{q_standard_paths::StandardLocation, QStandardPaths};
 
 use bdk::{
     bitcoin::{Address, Network},
@@ -35,7 +35,7 @@ use bdk::{
     SignOptions, SyncOptions, Wallet,
 };
 use qrcode_png::{Color, QrCode, QrCodeEcc};
-use std::{env, fs, fs::File, fs::create_dir_all, io::Write, path::PathBuf, str::FromStr};
+use std::{env, fs, fs::create_dir_all, fs::File, io::Write, path::PathBuf, str::FromStr};
 
 use gettextrs::{bindtextdomain, textdomain};
 use qmetaobject::*;
@@ -50,11 +50,10 @@ struct Greeter {
     receiving_address: qt_property!(QString),
     update_balance: qt_method!(
         fn update_balance(&mut self) -> QString {
-			println!("updating balance");
             if self.wallet.is_none() {
                 self.wallet = Some(log_err(Greeter::create_wallet()));
             }
-            log_err(self.get_balance()).into()
+            log_err_or(self.get_balance(), "balance unavailable".to_string()).into()
         }
     ),
     estimate_fee: qt_method!(
@@ -68,6 +67,16 @@ struct Greeter {
                 self.wallet = Some(log_err(Greeter::create_wallet()));
             }
             log_err(self.payto(&addr, &amount, &fee_rate));
+        }
+    ),
+    address: qt_method!(
+        fn address(&mut self) -> QString {
+            if self.wallet.is_none() {
+                self.wallet = Some(log_err(Greeter::create_wallet()));
+            }
+            let addr = log_err(self.get_receiving_address());
+            self.receiving_address = addr.clone().into();
+            addr.into()
         }
     ),
     address_qr: qt_method!(
@@ -140,10 +149,9 @@ impl Greeter {
     }
 
     fn generate_qr(&self, addr: &str) -> Result<PathBuf, String> {
-		let app_data_path =  unsafe {
-			QStandardPaths::writable_location(StandardLocation::AppDataLocation)
-		};
-	    let app_data_path = PathBuf::from(app_data_path.to_std_string());
+        let app_data_path =
+            unsafe { QStandardPaths::writable_location(StandardLocation::AppDataLocation) };
+        let app_data_path = PathBuf::from(app_data_path.to_std_string());
         create_dir_all(&app_data_path).unwrap();
         let qr_file = app_data_path.join("receiving.png");
 
@@ -170,25 +178,28 @@ impl Greeter {
             .as_ref()
             .unwrap()
             .sync(&blockchain, SyncOptions::default())
-            .unwrap();
+            .map_err(|e| format!("Failed to synchronize: {:?}", e))?;
 
-        match self.wallet.as_ref().unwrap().get_balance() {
-            Ok(bal) => Ok(format!(
-                "Balance: {} (+{}) BTC",
-                bal.confirmed / 100_000_000,
-                (bal.immature + bal.trusted_pending + bal.untrusted_pending) / 100_000_000
-            )),
-            Err(e) => Err(format!("Unable to determine the balance: {:?}", e)),
-        }
+        let bal = self
+            .wallet
+            .as_ref()
+            .unwrap()
+            .get_balance()
+            .map_err(|e| format!("Unable to determine the balance: {:?}", e))?;
+        println!("{:?}", bal);
+        Ok(format!(
+            "Balance: {} (+{}) BTC",
+            bal.confirmed as f32 / 100_000_000.0,
+            (bal.immature + bal.trusted_pending + bal.untrusted_pending) as f32 / 100_000_000.0
+        ))
     }
 
     pub fn create_wallet() -> Result<Wallet<MemoryDatabase>, String> {
         // load the wallet
         let network = Network::Bitcoin;
-        
-        let app_data_path =  unsafe {
-			QStandardPaths::writable_location(StandardLocation::AppDataLocation)
-		};
+
+        let app_data_path =
+            unsafe { QStandardPaths::writable_location(StandardLocation::AppDataLocation) };
         let wallet_file = PathBuf::from(app_data_path.to_std_string()).join("wallet.descriptor");
 
         let descriptors: (String, String) = if wallet_file.exists() {
@@ -199,17 +210,19 @@ impl Greeter {
             // Generate fresh mnemonic
             let mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
                 Mnemonic::generate((WordCount::Words12, Language::English))
-                .map_err(|e| format!("Failed to generate mnemonic: {:?}", e))?;
+                    .map_err(|e| format!("Failed to generate mnemonic: {:?}", e))?;
             // Convert mnemonic to string
             let mnemonic_words = mnemonic.to_string();
             // Parse a mnemonic
             let mnemonic = Mnemonic::parse(&mnemonic_words)
                 .map_err(|e| format!("Failed to parse mnemonic: {}", e))?;
             // Generate the extended key
-            let xkey: ExtendedKey = mnemonic.into_extended_key()
+            let xkey: ExtendedKey = mnemonic
+                .into_extended_key()
                 .map_err(|e| format!("Failed to convert mnemonic to xprv: {}", e))?;
             // Get xprv from the extended key
-            let xprv = xkey.into_xprv(network)
+            let xprv = xkey
+                .into_xprv(network)
                 .ok_or("Failed to convert xprv".to_string())?;
 
             (format!("wpkh({}/0/*)", xprv), format!("wpkh({}/1/*)", xprv))
@@ -223,16 +236,21 @@ impl Greeter {
         )
         .map_err(|e| format!("Failed to construct wallet: {}", e))?;
 
-        let prefix = wallet_file.parent()
-			.ok_or("Failed to get parent path".to_string())?;
-        create_dir_all(prefix)
-			.map_err(|e| format!("Failed to create directory: {}", e))?;
+        let prefix = wallet_file
+            .parent()
+            .ok_or("Failed to get parent path".to_string())?;
+        create_dir_all(prefix).map_err(|e| format!("Failed to create directory: {}", e))?;
         let mut output = File::create(wallet_file)
-			.map_err(|e| format!("Failed to create wallet file: {}", e))?;
+            .map_err(|e| format!("Failed to create wallet file: {}", e))?;
         let json = serde_json::to_string_pretty(&(&descriptors.0, &descriptors.1))
-			.map_err(|e| format!("Failed to format wallet file: {}", e))?;
-        write!(output, "{}", json)
-		.map_err(|e| format!("Failed to write wallet file: {}", e))?;
+            .map_err(|e| format!("Failed to format wallet file: {}", e))?;
+        write!(output, "{}", json).map_err(|e| format!("Failed to write wallet file: {}", e))?;
+
+        let client = Client::new(ELECTRUM_SERVER).unwrap();
+        let blockchain = ElectrumBlockchain::from(client);
+        wallet
+            .sync(&blockchain, SyncOptions::default())
+            .map_err(|e| eprintln!("failed to synchronize wallet: {}", e));
 
         Ok(wallet)
     }
@@ -242,8 +260,18 @@ fn log_err<T>(res: Result<T, String>) -> T {
     match res {
         Ok(d) => d,
         Err(err) => {
-			eprintln!("{}", err);
+            eprintln!("{}", err);
             panic!("{}", err);
+        }
+    }
+}
+
+fn log_err_or<T>(res: Result<T, String>, fallback: T) -> T {
+    match res {
+        Ok(d) => d,
+        Err(err) => {
+            eprintln!("{}", err);
+            fallback
         }
     }
 }
