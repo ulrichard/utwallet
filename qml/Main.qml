@@ -30,7 +30,7 @@ ApplicationWindow {
     objectName: 'mainView'
 
     width: units.gu(45)
-    height: units.gu(75)
+    height: units.gu(85)
     visible: true
 
     Greeter {
@@ -71,6 +71,11 @@ ApplicationWindow {
             TextField {
 				id: send_address
 				placeholderText: i18n.tr('Address')
+                anchors {
+                    left: parent.left
+                    right: parent.right
+                }
+				
             }
             
             Label {
@@ -81,6 +86,7 @@ ApplicationWindow {
             TextField {
 				id: send_amount
 				placeholderText: i18n.tr('Amount')
+				width: units.gu(20)
             }
 
             Label {
@@ -91,6 +97,7 @@ ApplicationWindow {
             TextField {
 				id: send_fee
 				placeholderText: i18n.tr('FeeRate [sat/vbyte]')
+				width: units.gu(20)
 				
 				Component.onCompleted: {
 					send_fee.text = greeter.estimate_fee();
@@ -138,13 +145,54 @@ ApplicationWindow {
 
             }
             
+            ListModel {
+                id: listModel
+                
+                ListElement {
+					date: "2022-11-26"
+					amount: 2.45
+				}
+                ListElement {
+					date: "2022-11-25"
+					amount: -2.45
+				}
+            }
+            Component {
+				id: txDelegate
+				Row {
+					spacing: 10
+						Text { text: date }
+						Text { text: amount }
+				}
+			}
+            UbuntuListView {
+                id: ubuntuListView
+                anchors { left: parent.left; right: parent.right }
+                height: units.gu(24)
+                model: listModel
+                delegate: txDelegate
+                
+                Component.onCompleted: {
+					greeter.update_transactions();
+				}
+            }
+            
             Item {
                 Layout.fillHeight: true
             }
             
             Timer {
 				interval: 20000; running: true; repeat: true
-				onTriggered: header.title = greeter.update_balance();
+				onTriggered: {
+					header.title = greeter.update_balance();
+					
+					var mm = greeter.update_transactions();
+					listModel = mm;
+//					var data = {'something': mm};
+//					listModel.append(data);
+					listModel.sync();
+//					listModel.setProperty(index, "amount", amount * 2)
+				}
 			}
         }
     }

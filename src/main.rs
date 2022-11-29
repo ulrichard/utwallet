@@ -19,6 +19,8 @@ extern crate cstr;
 extern crate cpp;
 #[macro_use]
 extern crate qmetaobject;
+use qmetaobject::listmodel::{SimpleListModel, SimpleListItem};
+use qmetaobject::*;
 use qt_core::{q_standard_paths::StandardLocation, QStandardPaths};
 
 use bdk::{
@@ -35,14 +37,44 @@ use bdk::{
     SignOptions, SyncOptions, Wallet,
 };
 use qrcode_png::{Color, QrCode, QrCodeEcc};
-use std::{env, fs, fs::create_dir_all, fs::File, io::Write, path::PathBuf, str::FromStr};
+use std::{
+    env, fs, fs::create_dir_all, fs::File, io::Write, iter::FromIterator, path::PathBuf,
+    str::FromStr,
+};
 
 use gettextrs::{bindtextdomain, textdomain};
-use qmetaobject::*;
 
 mod qrc;
 
 const ELECTRUM_SERVER: &str = "ssl://ulrichard.ch:50002";
+
+#[derive(Debug, Default, SimpleListItem)]
+struct TransactionListItem {
+	pub date: u32,
+	pub amount: f32,
+}
+
+impl TransactionListItem {
+	pub fn new(date: u32, amount: f32) -> Self {
+		TransactionListItem{date, amount}
+	}
+}
+	
+/*
+impl SimpleListItem for TransactionListItem {
+	fn get(&self, role: i32) -> QVariant {
+		match role {
+			0 => self.date.into(),
+			1 => self.amount.into(),
+			_ => QString::from("").into()
+		}
+	}
+
+	fn names() -> Vec<QByteArray> {
+		vec!["date".into(), "amount".into()]
+	}
+}
+*/
 
 #[derive(QObject, Default)]
 struct Greeter {
@@ -54,6 +86,14 @@ struct Greeter {
                 self.wallet = Some(log_err(Greeter::create_wallet()));
             }
             log_err_or(self.get_balance(), "balance unavailable".to_string()).into()
+        }
+    ),
+    update_transactions: qt_method!(
+        fn update_transactions(&mut self) -> SimpleListModel<TransactionListItem> {
+            if self.wallet.is_none() {
+                self.wallet = Some(log_err(Greeter::create_wallet()));
+            }
+            log_err(self.get_transactions())
         }
     ),
     estimate_fee: qt_method!(
@@ -194,6 +234,47 @@ impl Greeter {
         ))
     }
 
+    pub fn get_transactions(&self) -> Result<SimpleListModel<TransactionListItem>, String> {
+        let client = Client::new(ELECTRUM_SERVER).unwrap();
+        let blockchain = ElectrumBlockchain::from(client);
+
+        self.wallet
+            .as_ref()
+            .unwrap()
+            .sync(&blockchain, SyncOptions::default())
+            .map_err(|e| format!("Failed to synchronize: {:?}", e))?;
+
+        let mut transactions = self
+            .wallet
+            .as_ref()
+            .unwrap()
+            .list_transactions(false)
+            .map_err(|e| format!("Unable to determine the balance: {:?}", e))?;
+        transactions.sort_by(|a, b| {
+            b.confirmation_time
+                .as_ref()
+                .map(|t| t.height)
+                .cmp(&a.confirmation_time.as_ref().map(|t| t.height))
+        });
+        let transactions: Vec<_> = transactions
+            .iter()
+            .map(|td| {
+                TransactionListItem::new(
+                    match &td.confirmation_time {
+                        Some(ct) => ct.height,
+                        None => 0,
+                    },
+                    (td.received as f32 - td.sent as f32) / 100_000_000.0,
+                )
+            })
+            .collect();
+        println!("{:?}", transactions);
+
+        let model = SimpleListModel::from_iter(transactions.into_iter());
+
+        Ok(model)
+    }
+
     pub fn create_wallet() -> Result<Wallet<MemoryDatabase>, String> {
         // load the wallet
         let network = Network::Bitcoin;
@@ -248,9 +329,9 @@ impl Greeter {
 
         let client = Client::new(ELECTRUM_SERVER).unwrap();
         let blockchain = ElectrumBlockchain::from(client);
-        wallet
-            .sync(&blockchain, SyncOptions::default())
-            .map_err(|e| eprintln!("failed to synchronize wallet: {}", e));
+        if let Err(e) = wallet.sync(&blockchain, SyncOptions::default()) {
+            eprintln!("failed to synchronize wallet: {}", e);
+        };
 
         Ok(wallet)
     }
