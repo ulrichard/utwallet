@@ -19,7 +19,7 @@ extern crate cstr;
 extern crate cpp;
 #[macro_use]
 extern crate qmetaobject;
-use qmetaobject::listmodel::{SimpleListModel, SimpleListItem};
+use qmetaobject::listmodel::SimpleListModel;
 use qmetaobject::*;
 use qt_core::{q_standard_paths::StandardLocation, QStandardPaths};
 
@@ -60,22 +60,6 @@ impl TransactionListItem {
 	}
 }
 	
-/*
-impl SimpleListItem for TransactionListItem {
-	fn get(&self, role: i32) -> QVariant {
-		match role {
-			0 => self.date.into(),
-			1 => self.amount.into(),
-			_ => QString::from("").into()
-		}
-	}
-
-	fn names() -> Vec<QByteArray> {
-		vec!["date".into(), "amount".into()]
-	}
-}
-*/
-
 #[derive(QObject, Default)]
 struct Greeter {
     base: qt_base_class!(trait QObject),
@@ -395,6 +379,7 @@ fn main() {
     QQuickStyle::set_style("Suru");
     qrc::load();
     qml_register_type::<Greeter>(cstr!("Greeter"), 1, 0, cstr!("Greeter"));
+    qml_register_type::<SimpleListModel<TransactionListItem>>(cstr!("SimpleListModel"), 1, 0, cstr!("SimpleListModel"));
     let mut engine = QmlEngine::new();
     engine.load_file("qrc:/qml/Main.qml".into());
     engine.exec();
