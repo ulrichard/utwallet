@@ -19,65 +19,47 @@ extern crate cstr;
 extern crate cpp;
 #[macro_use]
 extern crate qmetaobject;
-use qmetaobject::listmodel::SimpleListModel;
 use qmetaobject::*;
 use qt_core::{q_standard_paths::StandardLocation, QStandardPaths};
 
+use crate::wallet::create_wallet;
+
 use bdk::{
-    bitcoin::{Address, Network},
+    bitcoin::Address,
     blockchain::ElectrumBlockchain,
     database::MemoryDatabase,
     electrum_client::{Client, ElectrumApi},
-    keys::{
-        bip39::{Language, Mnemonic, WordCount},
-        DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey,
-    },
-    miniscript,
     wallet::AddressIndex,
     SignOptions, SyncOptions, Wallet,
 };
 use qrcode_png::{Color, QrCode, QrCodeEcc};
-use std::{
-    env, fs, fs::create_dir_all, fs::File, io::Write, iter::FromIterator, path::PathBuf,
-    str::FromStr,
-};
+use std::{env, fs::create_dir_all, path::PathBuf, str::FromStr};
 
 use gettextrs::{bindtextdomain, textdomain};
 
 mod qrc;
+mod transactions;
+mod wallet;
 
 const ELECTRUM_SERVER: &str = "ssl://ulrichard.ch:50002";
 
-#[derive(Debug, Default, SimpleListItem)]
-struct TransactionListItem {
-	pub date: u32,
-	pub amount: f32,
-}
-
-impl TransactionListItem {
-	pub fn new(date: u32, amount: f32) -> Self {
-		TransactionListItem{date, amount}
-	}
-}
-	
 #[derive(QObject, Default)]
 struct Greeter {
     base: qt_base_class!(trait QObject),
     receiving_address: qt_property!(QString),
+    wallet: Option<Wallet<MemoryDatabase>>,
+
+    construct_wallet: qt_method!(
+        fn construct_wallet(&mut self) {
+            self.wallet = Some(log_err(create_wallet()));
+        }
+    ),
     update_balance: qt_method!(
         fn update_balance(&mut self) -> QString {
             if self.wallet.is_none() {
-                self.wallet = Some(log_err(Greeter::create_wallet()));
+                self.wallet = Some(log_err(create_wallet()));
             }
             log_err_or(self.get_balance(), "balance unavailable".to_string()).into()
-        }
-    ),
-    update_transactions: qt_method!(
-        fn update_transactions(&mut self) -> SimpleListModel<TransactionListItem> {
-            if self.wallet.is_none() {
-                self.wallet = Some(log_err(Greeter::create_wallet()));
-            }
-            log_err(self.get_transactions())
         }
     ),
     estimate_fee: qt_method!(
@@ -88,7 +70,7 @@ struct Greeter {
     send: qt_method!(
         fn send(&mut self, addr: String, amount: String, fee_rate: String) {
             if self.wallet.is_none() {
-                self.wallet = Some(log_err(Greeter::create_wallet()));
+                self.wallet = Some(log_err(create_wallet()));
             }
             log_err(self.payto(&addr, &amount, &fee_rate));
         }
@@ -96,7 +78,7 @@ struct Greeter {
     address: qt_method!(
         fn address(&mut self) -> QString {
             if self.wallet.is_none() {
-                self.wallet = Some(log_err(Greeter::create_wallet()));
+                self.wallet = Some(log_err(create_wallet()));
             }
             let addr = log_err(self.get_receiving_address());
             self.receiving_address = addr.clone().into();
@@ -106,7 +88,7 @@ struct Greeter {
     address_qr: qt_method!(
         fn address_qr(&mut self) -> QString {
             if self.wallet.is_none() {
-                self.wallet = Some(log_err(Greeter::create_wallet()));
+                self.wallet = Some(log_err(create_wallet()));
             }
             let addr = log_err(self.get_receiving_address());
             self.receiving_address = addr.clone().into();
@@ -117,7 +99,6 @@ struct Greeter {
             .into()
         }
     ),
-    wallet: Option<Wallet<MemoryDatabase>>,
 }
 
 impl Greeter {
@@ -217,108 +198,6 @@ impl Greeter {
             (bal.immature + bal.trusted_pending + bal.untrusted_pending) as f32 / 100_000_000.0
         ))
     }
-
-    pub fn get_transactions(&self) -> Result<SimpleListModel<TransactionListItem>, String> {
-        let client = Client::new(ELECTRUM_SERVER).unwrap();
-        let blockchain = ElectrumBlockchain::from(client);
-
-        self.wallet
-            .as_ref()
-            .unwrap()
-            .sync(&blockchain, SyncOptions::default())
-            .map_err(|e| format!("Failed to synchronize: {:?}", e))?;
-
-        let mut transactions = self
-            .wallet
-            .as_ref()
-            .unwrap()
-            .list_transactions(false)
-            .map_err(|e| format!("Unable to determine the balance: {:?}", e))?;
-        transactions.sort_by(|a, b| {
-            b.confirmation_time
-                .as_ref()
-                .map(|t| t.height)
-                .cmp(&a.confirmation_time.as_ref().map(|t| t.height))
-        });
-        let transactions: Vec<_> = transactions
-            .iter()
-            .map(|td| {
-                TransactionListItem::new(
-                    match &td.confirmation_time {
-                        Some(ct) => ct.height,
-                        None => 0,
-                    },
-                    (td.received as f32 - td.sent as f32) / 100_000_000.0,
-                )
-            })
-            .collect();
-        println!("{:?}", transactions);
-
-        let model = SimpleListModel::from_iter(transactions.into_iter());
-
-        Ok(model)
-    }
-
-    pub fn create_wallet() -> Result<Wallet<MemoryDatabase>, String> {
-        // load the wallet
-        let network = Network::Bitcoin;
-
-        let app_data_path =
-            unsafe { QStandardPaths::writable_location(StandardLocation::AppDataLocation) };
-        let wallet_file = PathBuf::from(app_data_path.to_std_string()).join("wallet.descriptor");
-
-        let descriptors: (String, String) = if wallet_file.exists() {
-            let json = fs::read_to_string(&wallet_file)
-                .map_err(|e| format!("Failed to read the wallet file {:?}: {}", wallet_file, e))?;
-            serde_json::from_str(&json).unwrap()
-        } else {
-            // Generate fresh mnemonic
-            let mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
-                Mnemonic::generate((WordCount::Words12, Language::English))
-                    .map_err(|e| format!("Failed to generate mnemonic: {:?}", e))?;
-            // Convert mnemonic to string
-            let mnemonic_words = mnemonic.to_string();
-            // Parse a mnemonic
-            let mnemonic = Mnemonic::parse(&mnemonic_words)
-                .map_err(|e| format!("Failed to parse mnemonic: {}", e))?;
-            // Generate the extended key
-            let xkey: ExtendedKey = mnemonic
-                .into_extended_key()
-                .map_err(|e| format!("Failed to convert mnemonic to xprv: {}", e))?;
-            // Get xprv from the extended key
-            let xprv = xkey
-                .into_xprv(network)
-                .ok_or("Failed to convert xprv".to_string())?;
-
-            (format!("wpkh({}/0/*)", xprv), format!("wpkh({}/1/*)", xprv))
-        };
-
-        let wallet = Wallet::new(
-            &descriptors.0,
-            Some(&descriptors.1),
-            network,
-            MemoryDatabase::default(),
-        )
-        .map_err(|e| format!("Failed to construct wallet: {}", e))?;
-
-        let prefix = wallet_file
-            .parent()
-            .ok_or("Failed to get parent path".to_string())?;
-        create_dir_all(prefix).map_err(|e| format!("Failed to create directory: {}", e))?;
-        let mut output = File::create(wallet_file)
-            .map_err(|e| format!("Failed to create wallet file: {}", e))?;
-        let json = serde_json::to_string_pretty(&(&descriptors.0, &descriptors.1))
-            .map_err(|e| format!("Failed to format wallet file: {}", e))?;
-        write!(output, "{}", json).map_err(|e| format!("Failed to write wallet file: {}", e))?;
-
-        let client = Client::new(ELECTRUM_SERVER).unwrap();
-        let blockchain = ElectrumBlockchain::from(client);
-        if let Err(e) = wallet.sync(&blockchain, SyncOptions::default()) {
-            eprintln!("failed to synchronize wallet: {}", e);
-        };
-
-        Ok(wallet)
-    }
 }
 
 fn log_err<T>(res: Result<T, String>) -> T {
@@ -379,7 +258,12 @@ fn main() {
     QQuickStyle::set_style("Suru");
     qrc::load();
     qml_register_type::<Greeter>(cstr!("Greeter"), 1, 0, cstr!("Greeter"));
-    qml_register_type::<SimpleListModel<TransactionListItem>>(cstr!("SimpleListModel"), 1, 0, cstr!("SimpleListModel"));
+    qml_register_type::<transactions::TransactionModel>(
+        cstr!("TransactionModel"),
+        1,
+        0,
+        cstr!("TransactionModel"),
+    );
     let mut engine = QmlEngine::new();
     engine.load_file("qrc:/qml/Main.qml".into());
     engine.exec();

@@ -15,6 +15,7 @@ bdk = { version = "0.23", features = ["electrum", "key-value-db", "all-keys"] }
 serde = "1.0.147"
 serde_json = "1.0.87"
 qrcode-png = "0.4"
+chrono = "0.4"
 
 [build-dependencies]
 cpp_build = "0.5"

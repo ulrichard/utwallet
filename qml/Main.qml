@@ -21,6 +21,7 @@ import QtQuick.Layouts 1.3
 import Qt.labs.settings 1.0
 
 import Greeter 1.0
+import TransactionModel 1.0
 
 // for widgets visit:
 // https://doc.qt.io/qt-6/qtquick-controls2-qmlmodule.html
@@ -30,11 +31,41 @@ ApplicationWindow {
     objectName: 'mainView'
 
     width: units.gu(45)
-    height: units.gu(85)
+    height: units.gu(95)
     visible: true
 
     Greeter {
         id: greeter
+
+        Component.onCompleted: {
+            construct_wallet();
+        }
+    }
+        
+    TransactionModel {
+        id: transactionsModel
+
+    }
+                
+    Component {
+        id: transactionsDelegate
+        RowLayout {
+            visible: true
+            height: units.gu(3)
+                Label {
+                    id: label1
+                    text: date
+                    verticalAlignment: Text.AlignVCenter
+                    font.pixelSize: 16
+                    width: units.gu(16)
+                }
+                Label {
+                    id: label2
+                    text: amount
+                    verticalAlignment: Text.AlignVCenter
+                    font.pixelSize: 16
+                }
+        }
     }
 
     Page {
@@ -71,10 +102,7 @@ ApplicationWindow {
             TextField {
 				id: send_address
 				placeholderText: i18n.tr('Address')
-                anchors {
-                    left: parent.left
-                    right: parent.right
-                }
+				Layout.fillWidth: true
 				
             }
             
@@ -145,35 +173,15 @@ ApplicationWindow {
 
             }
             
-            ListModel {
-                id: listModel
-                
-                ListElement {
-					date: "2022-11-26"
-					amount: 2.45
-				}
-                ListElement {
-					date: "2022-11-25"
-					amount: -2.45
-				}
-            }
-            Component {
-				id: txDelegate
-				Row {
-					spacing: 10
-						Text { text: date }
-						Text { text: amount }
-				}
-			}
-            UbuntuListView {
+            ListView {
                 id: ubuntuListView
-                anchors { left: parent.left; right: parent.right }
-                height: units.gu(24)
-                model: listModel
-                delegate: txDelegate
+                height: units.gu(34)
+                model: transactionsModel
+                delegate: transactionsDelegate
                 
                 Component.onCompleted: {
-					greeter.update_transactions();
+					transactionsModel.construct_wallet();
+					transactionsModel.update_transactions();
 				}
             }
             
@@ -186,12 +194,7 @@ ApplicationWindow {
 				onTriggered: {
 					header.title = greeter.update_balance();
 					
-					var mm = greeter.update_transactions();
-					listModel = mm;
-//					var data = {'something': mm};
-//					listModel.append(data);
-					listModel.sync();
-//					listModel.setProperty(index, "amount", amount * 2)
+					transactionsModel.update_transactions();
 				}
 			}
         }

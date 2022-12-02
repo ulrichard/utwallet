@@ -26,3 +26,6 @@ init:
 	export PATH=$PATH:~/.local/bin
 	clickable create
 
+setup:
+	sudo apt install docker.io adb git python3 python3-pip mesa-utils libgl1-mesa-glx
+	pip3 install --user --upgrade clickable-ut
