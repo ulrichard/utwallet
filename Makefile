@@ -19,6 +19,10 @@ phone:
 	clickable install --arch arm64
 	adb kill-server
 
+publish: 
+	clickable build
+	clickable publish --apikey $(shell gpg -d api-key.gpg)
+
 logs:
 	clickable logs --arch arm64
 
