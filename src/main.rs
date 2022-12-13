@@ -168,7 +168,7 @@ impl Greeter {
             .map_err(|e| format!("Failed to construct a QR code: {}", e))?;
 
         qrcode.margin(2);
-        qrcode.zoom(8);
+        qrcode.zoom(6);
 
         let buf = qrcode
             .generate(Color::Grayscale(0, 255))
