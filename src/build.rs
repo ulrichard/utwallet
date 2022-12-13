@@ -18,6 +18,7 @@ use std::fs;
 use std::fs::DirEntry;
 use std::path::PathBuf;
 use std::process::Command;
+use cmake;
 
 fn qmake_query(qmake: &str, args: &str, var: &str) -> String {
     let mut qmake_cmd_list: Vec<&str> = qmake.split(' ').collect();
@@ -197,4 +198,11 @@ fn main() {
         "cargo:rustc-link-lib{}=Qt{}QuickControls2",
         macos_lib_search, macos_lib_framework
     );
+
+    // Builds the project in the directory located in `qzxing`, installing it
+    // into $OUT_DIR
+    let dst = cmake::build("qzxing/src");
+
+    println!("cargo:rustc-link-search=native={}", dst.display());
+    println!("cargo:rustc-link-lib=static=qzxing");
 }
