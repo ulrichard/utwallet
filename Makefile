@@ -1,7 +1,7 @@
 # https://ubports.com/de/blog/ubports-blogs-nachrichten-1/post/introduction-to-clickable-147
 # https://docs.ubports.com/en/latest/appdev/platform/apparmor.html
 # In desktop mode /home/phablet is mounted to ~/.clickable/home/. You can manipulate and add data there.
-# If the logs target doesn't show the logs, check the following file on the device:  ~/.cache/upstart/application-click-utwallet.ulrichard_utwallet_1.0.0.log
+# If the logs target doesn't show the logs, check the following file on the device:  ~/.cache/upstart/application-click-utwallet.ulrichard_utwallet_0.0.2.log
 
 test: 
 	export all_proxy=""
@@ -20,8 +20,12 @@ phone:
 	adb kill-server
 
 publish: 
-	clickable build
-	clickable publish --apikey $(shell gpg -d api-key.gpg)
+	clickable build --arch arm64
+	clickable publish --apikey $(shell gpg -d api-key.gpg) --arch arm64
+	clickable build --arch amd64
+	clickable publish --apikey $(shell gpg -d api-key.gpg) --arch amd64
+	clickable build --arch armhf
+	clickable publish --apikey $(shell gpg -d api-key.gpg) --arch armhf
 
 logs:
 	clickable logs --arch arm64

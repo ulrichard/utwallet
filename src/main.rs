@@ -72,7 +72,11 @@ struct Greeter {
             if self.wallet.is_none() {
                 self.wallet = Some(log_err(create_wallet()));
             }
-            log_err(self.payto(&addr, &amount, &fee_rate));
+            if addr.is_empty() || amount.is_empty() || fee_rate.is_empty() {
+				eprintln!("all the fields need to be filled");
+			} else {
+				log_err(self.payto(&addr, &amount, &fee_rate));
+			}
         }
     ),
     address: qt_method!(
@@ -164,7 +168,7 @@ impl Greeter {
             .map_err(|e| format!("Failed to construct a QR code: {}", e))?;
 
         qrcode.margin(2);
-        qrcode.zoom(6);
+        qrcode.zoom(8);
 
         let buf = qrcode
             .generate(Color::Grayscale(0, 255))
