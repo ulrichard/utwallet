@@ -20,21 +20,12 @@
  *   You should have received a copy of the GNU General Public License
  *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-use crate::log_err;
-use crate::wallet::create_wallet;
+use crate::wallet::BdkWallet;
 
 use qmetaobject::*;
 
-use bdk::{
-    blockchain::ElectrumBlockchain, database::MemoryDatabase, electrum_client::Client, SyncOptions,
-    Wallet,
-};
-
 use chrono::prelude::*;
-use std::{collections::HashMap};
-
-
-const ELECTRUM_SERVER: &str = "ssl://ulrichard.ch:50002";
+use std::collections::HashMap;
 
 #[derive(Default, Clone)]
 struct TransactionItem {
@@ -49,20 +40,14 @@ pub struct TransactionModel {
     count: qt_property!(i32; READ row_count NOTIFY count_changed),
     count_changed: qt_signal!(),
     list: Vec<TransactionItem>,
-    wallet: Option<Wallet<MemoryDatabase>>,
 
-    construct_wallet: qt_method!(
-        fn construct_wallet(&mut self) {
-            self.wallet = Some(log_err(create_wallet()));
-        }
-    ),
     insert_rows: qt_method!(fn(&mut self, row: usize, count: usize) -> bool),
     remove_rows: qt_method!(fn(&mut self, row: usize, count: usize) -> bool),
     add: qt_method!(fn(&mut self, date: u64, amount: f32)),
     remove: qt_method!(fn(&mut self, index: u64) -> bool),
     update_transactions: qt_method!(
         fn update_transactions(&mut self) {
-            match self.get_transactions() {
+            match BdkWallet::get_transactions() {
                 Ok(txs) => {
                     self.clear();
                     for tx in txs {
@@ -120,45 +105,6 @@ impl TransactionModel {
     fn clear(&mut self) {
         self.remove_rows(0, self.count as usize);
     }
-
-    pub fn get_transactions(&self) -> Result<Vec<(u64, f32)>, String> {
-        let client = Client::new(ELECTRUM_SERVER).unwrap();
-        let blockchain = ElectrumBlockchain::from(client);
-
-        self.wallet
-            .as_ref()
-            .unwrap()
-            .sync(&blockchain, SyncOptions::default())
-            .map_err(|e| format!("Failed to synchronize: {:?}", e))?;
-
-        let mut transactions = self
-            .wallet
-            .as_ref()
-            .unwrap()
-            .list_transactions(false)
-            .map_err(|e| format!("Unable to get transactions: {:?}", e))?;
-        transactions.sort_by(|a, b| {
-            b.confirmation_time
-                .as_ref()
-                .map(|t| t.height)
-                .cmp(&a.confirmation_time.as_ref().map(|t| t.height))
-        });
-        let transactions: Vec<_> = transactions
-            .iter()
-            .map(|td| {
-                (
-                    match &td.confirmation_time {
-                        Some(ct) => ct.timestamp,
-                        None => 0,
-                    },
-                    (td.received as f32 - td.sent as f32) / 100_000_000.0,
-                )
-            })
-            .collect();
-        println!("{:?}", transactions);
-
-        Ok(transactions)
-    }
 }
 
 impl QAbstractListModel for TransactionModel {
@@ -171,20 +117,21 @@ impl QAbstractListModel for TransactionModel {
         if idx < self.list.len() {
             if role == USER_ROLE {
                 // Create a NaiveDateTime from the timestamp
-				let datestring = if let Some(naive) = NaiveDateTime::from_timestamp_opt(self.list[idx].date as i64, 0) {
-    
-					// Create a normal DateTime from the NaiveDateTime
-					let datetime: DateTime<Utc> = DateTime::from_utc(naive, Utc);
-    
-					// Format the datetime how you want
-					let dt = datetime.format("%Y-%m-%d %H:%M");
-					
-					format!("{}", dt)
-				} else {
-					"mempool".to_string()
-				};
-				
-				QString::from(datestring).into()
+                let datestring = if let Some(naive) =
+                    NaiveDateTime::from_timestamp_opt(self.list[idx].date as i64, 0)
+                {
+                    // Create a normal DateTime from the NaiveDateTime
+                    let datetime: DateTime<Utc> = DateTime::from_utc(naive, Utc);
+
+                    // Format the datetime how you want
+                    let dt = datetime.format("%Y-%m-%d %H:%M");
+
+                    format!("{}", dt)
+                } else {
+                    "mempool".to_string()
+                };
+
+                QString::from(datestring).into()
             } else if role == USER_ROLE + 1 {
                 QString::from(format!("{:.6}", self.list[idx].amount)).into()
             } else {

@@ -36,15 +36,10 @@ ApplicationWindow {
 
     Greeter {
         id: greeter
-
-        Component.onCompleted: {
-            construct_wallet();
-        }
     }
         
     TransactionModel {
         id: transactionsModel
-
     }
                 
     Component {
@@ -178,11 +173,6 @@ ApplicationWindow {
                 height: units.gu(34)
                 model: transactionsModel
                 delegate: transactionsDelegate
-                
-                Component.onCompleted: {
-					transactionsModel.construct_wallet();
-					transactionsModel.update_transactions();
-				}
             }
             
             Item {
@@ -190,11 +180,22 @@ ApplicationWindow {
             }
             
             Timer {
-				interval: 20000; running: true; repeat: true
+				id: main_timer;
+				interval: 2000;
+				running: true;
+				repeat: true
+				
 				onTriggered: {
+					main_timer.stop();
+					
 					header.title = greeter.update_balance();
 					
 					transactionsModel.update_transactions();
+					
+					receive_qr_code.source = greeter.address_qr();
+
+					main_timer.interval = 20000;
+					main_timer.start();
 				}
 			}
         }

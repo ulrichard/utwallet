@@ -22,15 +22,13 @@ extern crate qmetaobject;
 use qmetaobject::*;
 use qt_core::{q_standard_paths::StandardLocation, QStandardPaths};
 
-use crate::wallet::create_wallet;
+use crate::wallet::BdkWallet;
 
 use bdk::{
     bitcoin::Address,
     blockchain::ElectrumBlockchain,
-    database::MemoryDatabase,
-    electrum_client::{Client, ElectrumApi},
+    electrum_client::ElectrumApi,
     wallet::AddressIndex,
-    SignOptions, SyncOptions, Wallet,
 };
 use qrcode_png::{Color, QrCode, QrCodeEcc};
 use std::{env, fs::create_dir_all, path::PathBuf, str::FromStr};
@@ -41,25 +39,14 @@ mod qrc;
 mod transactions;
 mod wallet;
 
-const ELECTRUM_SERVER: &str = "ssl://ulrichard.ch:50002";
-
 #[derive(QObject, Default)]
 struct Greeter {
     base: qt_base_class!(trait QObject),
     receiving_address: qt_property!(QString),
-    wallet: Option<Wallet<MemoryDatabase>>,
 
-    construct_wallet: qt_method!(
-        fn construct_wallet(&mut self) {
-            self.wallet = Some(log_err(create_wallet()));
-        }
-    ),
     update_balance: qt_method!(
         fn update_balance(&mut self) -> QString {
-            if self.wallet.is_none() {
-                self.wallet = Some(log_err(create_wallet()));
-            }
-            log_err_or(self.get_balance(), "balance unavailable".to_string()).into()
+            log_err_or(BdkWallet::get_balance(), "balance unavailable".to_string()).into()
         }
     ),
     estimate_fee: qt_method!(
@@ -69,21 +56,15 @@ struct Greeter {
     ),
     send: qt_method!(
         fn send(&mut self, addr: String, amount: String, fee_rate: String) {
-            if self.wallet.is_none() {
-                self.wallet = Some(log_err(create_wallet()));
-            }
             if addr.is_empty() || amount.is_empty() || fee_rate.is_empty() {
-				eprintln!("all the fields need to be filled");
-			} else {
-				log_err(self.payto(&addr, &amount, &fee_rate));
-			}
+                eprintln!("all the fields need to be filled");
+            } else {
+                log_err(self.payto(&addr, &amount, &fee_rate));
+            }
         }
     ),
     address: qt_method!(
         fn address(&mut self) -> QString {
-            if self.wallet.is_none() {
-                self.wallet = Some(log_err(create_wallet()));
-            }
             let addr = log_err(self.get_receiving_address());
             self.receiving_address = addr.clone().into();
             addr.into()
@@ -91,9 +72,6 @@ struct Greeter {
     ),
     address_qr: qt_method!(
         fn address_qr(&mut self) -> QString {
-            if self.wallet.is_none() {
-                self.wallet = Some(log_err(create_wallet()));
-            }
             let addr = log_err(self.get_receiving_address());
             self.receiving_address = addr.clone().into();
             format!(
@@ -107,7 +85,6 @@ struct Greeter {
 
 impl Greeter {
     fn payto(&self, addr: &str, amount: &str, fee_rate: &str) -> Result<String, String> {
-        let wallet = self.wallet.as_ref().unwrap();
         let recipient = Address::from_str(addr)
             .map_err(|e| format!("Failed to parse address {} : {}", addr, e))?;
         let amount = parse_satoshis(amount)?;
@@ -116,43 +93,11 @@ impl Greeter {
                 .map_err(|e| format!("Failed to parse fee_rate {} : {}", fee_rate, e))?,
         );
 
-        // construct the tx
-        let mut builder = wallet.build_tx();
-        builder
-            .add_recipient(recipient.script_pubkey(), amount)
-            .enable_rbf()
-            .fee_rate(fee_rate);
-        let (mut psbt, _) = builder
-            .finish()
-            .map_err(|e| format!("Failed to finish the transaction: {}", e))?;
-
-        // sign
-        let signopt = SignOptions {
-            ..Default::default()
-        };
-        let finalized = wallet
-            .sign(&mut psbt, signopt)
-            .map_err(|e| format!("Failed to sign the transaction: {}", e))?;
-        if !finalized {
-            println!("The tx is not finalized after signing");
-        }
-
-        // broadcast
-        let tx = psbt.extract_tx();
-        let client = Client::new(ELECTRUM_SERVER)
-            .map_err(|e| format!("Failed to construct an electrum client: {}", e))?;
-        let txid = client
-            .transaction_broadcast(&tx)
-            .map_err(|e| format!("Failed to broadcast the transaction: {}", e))?;
-
-        Ok(txid.to_string())
+        BdkWallet::payto(recipient, amount, fee_rate)
     }
 
     fn get_receiving_address(&self) -> Result<String, String> {
-        let wallet = self.wallet.as_ref().unwrap();
-        let addr = wallet
-            .get_address(AddressIndex::New)
-            .map_err(|e| format!("Failed to get an address from the wallet: {}", e))?
+        let addr = BdkWallet::get_address(AddressIndex::New)?
             .to_string();
         Ok(addr)
     }
@@ -178,30 +123,6 @@ impl Greeter {
 
         Ok(qr_file)
     }
-
-    pub fn get_balance(&self) -> Result<String, String> {
-        let client = Client::new(ELECTRUM_SERVER).unwrap();
-        let blockchain = ElectrumBlockchain::from(client);
-
-        self.wallet
-            .as_ref()
-            .unwrap()
-            .sync(&blockchain, SyncOptions::default())
-            .map_err(|e| format!("Failed to synchronize: {:?}", e))?;
-
-        let bal = self
-            .wallet
-            .as_ref()
-            .unwrap()
-            .get_balance()
-            .map_err(|e| format!("Unable to determine the balance: {:?}", e))?;
-        println!("{:?}", bal);
-        Ok(format!(
-            "Balance: {} (+{}) BTC",
-            bal.confirmed as f32 / 100_000_000.0,
-            (bal.immature + bal.trusted_pending + bal.untrusted_pending) as f32 / 100_000_000.0
-        ))
-    }
 }
 
 fn log_err<T>(res: Result<T, String>) -> T {
@@ -225,8 +146,7 @@ fn log_err_or<T>(res: Result<T, String>, fallback: T) -> T {
 }
 
 fn get_fee_rate(blocks: usize) -> Result<f32, String> {
-    let client = Client::new(ELECTRUM_SERVER)
-        .map_err(|e| format!("Failed to construct an electrum client: {}", e))?;
+    let client = BdkWallet::get_electrum_server()?;
     let blockchain = ElectrumBlockchain::from(client);
 
     let fee_rate = blockchain
@@ -269,6 +189,9 @@ fn main() {
         cstr!("TransactionModel"),
     );
     let mut engine = QmlEngine::new();
+    
+    log_err(BdkWallet::init_wallet());
+
     engine.load_file("qrc:/qml/Main.qml".into());
     engine.exec();
 }
