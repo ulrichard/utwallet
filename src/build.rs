@@ -18,7 +18,7 @@ use std::fs;
 use std::fs::DirEntry;
 use std::path::PathBuf;
 use std::process::Command;
-use cmake;
+//use cmake;
 
 fn qmake_query(qmake: &str, args: &str, var: &str) -> String {
     let mut qmake_cmd_list: Vec<&str> = qmake.split(' ').collect();
@@ -201,8 +201,8 @@ fn main() {
 
     // Builds the project in the directory located in `qzxing`, installing it
     // into $OUT_DIR
-    let dst = cmake::build("qzxing/src");
+//    let dst = cmake::build("qzxing/src");
 
-    println!("cargo:rustc-link-search=native={}", dst.display());
-    println!("cargo:rustc-link-lib=static=qzxing");
+//    println!("cargo:rustc-link-search=native={}", dst.display());
+//    println!("cargo:rustc-link-lib=static=qzxing");
 }

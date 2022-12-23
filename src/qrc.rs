@@ -1,8 +1,9 @@
 qrc!(qml_resources,
     "/" {
-        "qml/Main.qml",
-        "ScanPage.qml",
-        "ErrorDialog.qml"
+        "qml/utwallet.qml",
+        "qml/MainPage.qml",
+        "qml/ScanPage.qml",
+        "qml/ErrorDialog.qml"
     },
 );
 

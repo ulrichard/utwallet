@@ -16,23 +16,22 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  */
-import Ergo 0.0
-import OAth 1.0
 import QtGraphicalEffects 1.0
 import QtMultimedia 5.8
 import QtQuick 2.7
-import QtQuick.Layouts 1.1
+import QtQuick.Layouts 1.3
 import QtQuick.Controls 2.2
 import QtQuick.Window 2.0
 
-import QZXing 2.3
+//import QZXing 2.3
 
 Page {
     id: scanPage
 
     signal close()
-    signal save(Account account)
+    signal save(string data)
 
+/*
     header: AdaptiveToolbar {
         width: parent.width
         height: 48
@@ -54,6 +53,7 @@ Page {
             font.pixelSize: 24
         }
     }
+*/
 
     Camera {
         id: camera
@@ -125,6 +125,7 @@ Page {
         anchors.fill: parent
     }
 
+/*
     QZXing {
         id: qrCodeReader
 
@@ -154,6 +155,7 @@ Page {
 
         tryHarder: false
     }
+*/
 
     Label {
         id: scanLabel

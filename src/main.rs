@@ -192,7 +192,7 @@ fn main() {
     
     log_err(BdkWallet::init_wallet());
 
-    engine.load_file("qrc:/qml/Main.qml".into());
+    engine.load_file("qrc:/qml/utwallet.qml".into());
     engine.exec();
 }
 

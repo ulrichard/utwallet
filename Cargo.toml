@@ -1,6 +1,6 @@
 [package]
 name = "utwallet"
-version = "0.0.3"
+version = "0.0.4"
 authors = ["Richard Ulrich <richi+utwallet@ulrichard.ch>"]
 edition = "2018"
 build = "src/build.rs"
