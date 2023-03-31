@@ -51,9 +51,11 @@ impl BdkWallet {
     }
 
     pub fn payto(recipient: Address, amount: u64, fee_rate: FeeRate) -> Result<String, String> {
-        let wallet_m = UTWALLET.lock().map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
+        let wallet_m = UTWALLET
+            .lock()
+            .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let wallet = wallet_m.as_ref().ok_or("The wallet was not initialized")?;
-		let client = Self::get_electrum_server()?;
+        let client = Self::get_electrum_server()?;
         let blockchain = ElectrumBlockchain::from(client);
 
         wallet
@@ -92,15 +94,21 @@ impl BdkWallet {
     }
 
     pub fn get_address(address_index: AddressIndex) -> Result<AddressInfo, String> {
-        let wallet_m = UTWALLET.lock().map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
+        let wallet_m = UTWALLET
+            .lock()
+            .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let wallet = wallet_m.as_ref().ok_or("The wallet was not initialized")?;
-        wallet.get_address(address_index).map_err(|e| format!("Failed to get an daddress: {:?}", e))
+        wallet
+            .get_address(address_index)
+            .map_err(|e| format!("Failed to get an daddress: {:?}", e))
     }
 
     pub fn get_balance() -> Result<String, String> {
-        let wallet_m = UTWALLET.lock().map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
+        let wallet_m = UTWALLET
+            .lock()
+            .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let wallet = wallet_m.as_ref().ok_or("The wallet was not initialized")?;
-		let client = Self::get_electrum_server()?;
+        let client = Self::get_electrum_server()?;
         let blockchain = ElectrumBlockchain::from(client);
 
         wallet
@@ -119,9 +127,11 @@ impl BdkWallet {
     }
 
     pub fn get_transactions() -> Result<Vec<(u64, f32)>, String> {
-        let wallet_m = UTWALLET.lock().map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
+        let wallet_m = UTWALLET
+            .lock()
+            .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let wallet = wallet_m.as_ref().ok_or("The wallet was not initialized")?;
-		let client = Self::get_electrum_server()?;
+        let client = Self::get_electrum_server()?;
         let blockchain = ElectrumBlockchain::from(client);
 
         wallet

@@ -64,9 +64,9 @@ ApplicationWindow {
             visible: false
 
             onScanCode: {
-                console.assert(pageStack != null, "pageStack must not be empty");
-                console.assert(scanPageComponent != null, "scanPageComponent must not be empty");
-                pageStack.push(scanPageComponent);
+                console.assert(root.pageStack !== null, "pageStack must not be empty");
+                console.assert(root.scanPageComponent !== null, "scanPageComponent must not be empty");
+                root.pageStack.push(root.scanPageComponent);
             }
         }
     }

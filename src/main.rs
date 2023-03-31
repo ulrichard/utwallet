@@ -22,22 +22,22 @@ extern crate qmetaobject;
 use qmetaobject::*;
 use qt_core::{q_standard_paths::StandardLocation, QStandardPaths};
 
+mod input_eval;
+mod qrc;
+mod transactions;
+mod wallet;
+
+use crate::input_eval::InputEval;
 use crate::wallet::BdkWallet;
 
 use bdk::{
-    bitcoin::Address,
-    blockchain::ElectrumBlockchain,
-    electrum_client::ElectrumApi,
+    bitcoin::Address, blockchain::ElectrumBlockchain, electrum_client::ElectrumApi,
     wallet::AddressIndex,
 };
 use qrcode_png::{Color, QrCode, QrCodeEcc};
 use std::{env, fs::create_dir_all, path::PathBuf, str::FromStr};
 
 use gettextrs::{bindtextdomain, textdomain};
-
-mod qrc;
-mod transactions;
-mod wallet;
 
 #[derive(QObject, Default)]
 struct Greeter {
@@ -81,6 +81,15 @@ struct Greeter {
             .into()
         }
     ),
+    evaluate_address_input: qt_method!(
+        fn evaluate_address_input(&mut self, addr: String) -> QString {
+            if !addr.trim().is_empty() {
+                log_err(self.evaluate_input(addr.trim())).into()
+            } else {
+                " # ".into()
+            }
+        }
+    ),
 }
 
 impl Greeter {
@@ -96,9 +105,19 @@ impl Greeter {
         BdkWallet::payto(recipient, amount, fee_rate)
     }
 
+    fn evaluate_input(&self, addr: &str) -> Result<String, String> {
+        let eval = InputEval::evaluate(addr)?;
+        eprintln!("{:?}", eval);
+        let (addr, amount) = match eval {
+            InputEval::Mainnet(addr, amount) => (addr, amount),
+            InputEval::Lightning(invoice, amount) => (invoice, amount),
+        };
+
+        Ok(format!("{}#{}", addr, amount as f32 / 100000000.0))
+    }
+
     fn get_receiving_address(&self) -> Result<String, String> {
-        let addr = BdkWallet::get_address(AddressIndex::New)?
-            .to_string();
+        let addr = BdkWallet::get_address(AddressIndex::New)?.to_string();
         Ok(addr)
     }
 
@@ -189,7 +208,7 @@ fn main() {
         cstr!("TransactionModel"),
     );
     let mut engine = QmlEngine::new();
-    
+
     log_err(BdkWallet::init_wallet());
 
     engine.load_file("qrc:/qml/utwallet.qml".into());

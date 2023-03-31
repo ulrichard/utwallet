@@ -3,13 +3,19 @@
 # In desktop mode /home/phablet is mounted to ~/.clickable/home/. You can manipulate and add data there.
 # If the logs target doesn't show the logs, check the following file on the device:  ~/.cache/upstart/application-click-utwallet.ulrichard_utwallet_0.0.2.log
 
-test: 
+gui:
 	export all_proxy=""
 	export ALL_PROXY=""
 	export PATH=$PATH:~/.local/bin
 	clickable update || clickable desktop
 
-phone: 
+test:
+	export all_proxy=""
+	export ALL_PROXY=""
+	export PATH=$PATH:~/.local/bin
+	clickable test
+
+phone:
 	export all_proxy=""
 	export ALL_PROXY=""
 	export PATH=$PATH:~/.local/bin
@@ -36,4 +42,4 @@ init:
 
 setup:
 	sudo apt install docker.io adb git python3 python3-pip mesa-utils libgl1-mesa-glx
-	pip3 install --user --upgrade clickable-ut
+	pip3 install --user --break-system-packages --upgrade clickable-ut
