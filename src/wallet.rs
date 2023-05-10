@@ -16,11 +16,12 @@
 
 use qt_core::{q_standard_paths::StandardLocation, QStandardPaths};
 
+use crate::constants::ESPLORA_SERVERS;
+
 use bdk::{
     bitcoin::{Address, Network},
-    blockchain::ElectrumBlockchain,
+    blockchain::{Blockchain, EsploraBlockchain},
     database::MemoryDatabase,
-    electrum_client::{Client, ElectrumApi},
     keys::{
         bip39::{Language, Mnemonic, WordCount},
         DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey,
@@ -33,15 +34,12 @@ use bdk::{
 use std::sync::Mutex;
 use std::{fs, fs::create_dir_all, fs::File, io::Write, path::PathBuf};
 
-const ELECTRUM_SERVERS: &[&str] = &[
-    "ssl://electrum.blockstream.info:50002",
-    "ssl://ax101.blockeng.ch:50002",
-    "ssl://ulrichard.ch:50002",
-];
+pub struct BdkWallet {
+    wallet: Wallet<MemoryDatabase>,
+    runtime: tokio::runtime::Runtime,
+}
 
-pub struct BdkWallet {}
-
-static UTWALLET: Mutex<Option<Wallet<MemoryDatabase>>> = Mutex::new(None);
+static UTWALLET: Mutex<Option<BdkWallet>> = Mutex::new(None);
 
 /// A facade for bdk::Wallet with a singleton instance
 impl BdkWallet {
@@ -50,47 +48,50 @@ impl BdkWallet {
         Ok(())
     }
 
-    pub fn payto(recipient: Address, amount: u64, fee_rate: FeeRate) -> Result<String, String> {
+    pub fn payto(recipient: Address, amount: u64, fee_rate: FeeRate) -> Result<(), String> {
         let wallet_m = UTWALLET
             .lock()
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let wallet = wallet_m.as_ref().ok_or("The wallet was not initialized")?;
-        let client = Self::get_electrum_server()?;
-        let blockchain = ElectrumBlockchain::from(client);
+        let blockchain = Self::get_esplora_blockchain()?;
 
-        wallet
-            .sync(&blockchain, SyncOptions::default())
-            .map_err(|e| format!("Failed to synchronize: {:?}", e))?;
+        wallet.runtime.block_on(async {
+            wallet
+                .wallet
+                .sync(&blockchain, SyncOptions::default())
+                .await
+                .map_err(|e| format!("Failed to synchronize: {:?}", e))?;
 
-        // construct the tx
-        let mut builder = wallet.build_tx();
-        builder
-            .add_recipient(recipient.script_pubkey(), amount)
-            .enable_rbf()
-            .fee_rate(fee_rate);
-        let (mut psbt, _) = builder
-            .finish()
-            .map_err(|e| format!("Failed to finish the transaction: {}", e))?;
+            // construct the tx
+            let mut builder = wallet.wallet.build_tx();
+            builder
+                .add_recipient(recipient.script_pubkey(), amount)
+                .enable_rbf()
+                .fee_rate(fee_rate);
+            let (mut psbt, _) = builder
+                .finish()
+                .map_err(|e| format!("Failed to finish the transaction: {}", e))?;
 
-        // sign
-        let signopt = SignOptions {
-            ..Default::default()
-        };
-        let finalized = wallet
-            .sign(&mut psbt, signopt)
-            .map_err(|e| format!("Failed to sign the transaction: {}", e))?;
-        if !finalized {
-            println!("The tx is not finalized after signing");
-        }
+            // sign
+            let signopt = SignOptions {
+                ..Default::default()
+            };
+            let finalized = wallet
+                .wallet
+                .sign(&mut psbt, signopt)
+                .map_err(|e| format!("Failed to sign the transaction: {}", e))?;
+            if !finalized {
+                println!("The tx is not finalized after signing");
+            }
 
-        // broadcast
-        let tx = psbt.extract_tx();
-        let client = Self::get_electrum_server()?;
-        let txid = client
-            .transaction_broadcast(&tx)
-            .map_err(|e| format!("Failed to broadcast the transaction: {}", e))?;
-
-        Ok(txid.to_string())
+            // broadcast
+            let tx = psbt.extract_tx();
+            blockchain
+                .broadcast(&tx)
+                .await
+                .map_err(|e| format!("Failed to broadcast the transaction: {}", e))?;
+            Ok(())
+        })
     }
 
     pub fn get_address(address_index: AddressIndex) -> Result<AddressInfo, String> {
@@ -99,6 +100,7 @@ impl BdkWallet {
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let wallet = wallet_m.as_ref().ok_or("The wallet was not initialized")?;
         wallet
+            .wallet
             .get_address(address_index)
             .map_err(|e| format!("Failed to get an daddress: {:?}", e))
     }
@@ -108,16 +110,20 @@ impl BdkWallet {
             .lock()
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let wallet = wallet_m.as_ref().ok_or("The wallet was not initialized")?;
-        let client = Self::get_electrum_server()?;
-        let blockchain = ElectrumBlockchain::from(client);
+        let blockchain = Self::get_esplora_blockchain()?;
 
-        wallet
-            .sync(&blockchain, SyncOptions::default())
-            .map_err(|e| format!("Failed to synchronize: {:?}", e))?;
+        let bal = wallet.runtime.block_on(async {
+            wallet
+                .wallet
+                .sync(&blockchain, SyncOptions::default())
+                .await
+                .map_err(|e| format!("Failed to synchronize: {:?}", e))?;
 
-        let bal = wallet
-            .get_balance()
-            .map_err(|e| format!("Unable to determine the balance: {:?}", e))?;
+            wallet
+                .wallet
+                .get_balance()
+                .map_err(|e| format!("Unable to determine the balance: {:?}", e))
+        })?;
         println!("{:?}", bal);
         Ok(format!(
             "Balance: {} (+{}) BTC",
@@ -131,54 +137,82 @@ impl BdkWallet {
             .lock()
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let wallet = wallet_m.as_ref().ok_or("The wallet was not initialized")?;
-        let client = Self::get_electrum_server()?;
-        let blockchain = ElectrumBlockchain::from(client);
+        let blockchain = Self::get_esplora_blockchain()?;
 
-        wallet
-            .sync(&blockchain, SyncOptions::default())
-            .map_err(|e| format!("Failed to synchronize: {:?}", e))?;
+        let transactions: Result<_, String> = wallet.runtime.block_on(async {
+            wallet
+                .wallet
+                .sync(&blockchain, SyncOptions::default())
+                .await
+                .map_err(|e| format!("Failed to synchronize: {:?}", e))?;
 
-        let mut transactions = wallet
-            .list_transactions(false)
-            .map_err(|e| format!("Unable to get transactions: {:?}", e))?;
-        transactions.sort_by(|a, b| {
-            b.confirmation_time
-                .as_ref()
-                .map(|t| t.height)
-                .cmp(&a.confirmation_time.as_ref().map(|t| t.height))
+            let mut transactions = wallet
+                .wallet
+                .list_transactions(false)
+                .map_err(|e| format!("Unable to get transactions: {:?}", e))?;
+            transactions.sort_by(|a, b| {
+                b.confirmation_time
+                    .as_ref()
+                    .map(|t| t.height)
+                    .cmp(&a.confirmation_time.as_ref().map(|t| t.height))
+            });
+            let transactions: Vec<_> = transactions
+                .iter()
+                .map(|td| {
+                    (
+                        match &td.confirmation_time {
+                            Some(ct) => ct.timestamp,
+                            None => 0,
+                        },
+                        (td.received as f32 - td.sent as f32) / 100_000_000.0,
+                    )
+                })
+                .collect();
+            Ok(transactions)
         });
-        let transactions: Vec<_> = transactions
-            .iter()
-            .map(|td| {
-                (
-                    match &td.confirmation_time {
-                        Some(ct) => ct.timestamp,
-                        None => 0,
-                    },
-                    (td.received as f32 - td.sent as f32) / 100_000_000.0,
-                )
-            })
-            .collect();
+        let transactions = transactions?;
         println!("{:?}", transactions);
 
         Ok(transactions)
     }
 
-    pub fn get_electrum_server() -> Result<Client, String> {
-        for url in ELECTRUM_SERVERS {
-            if let Ok(client) = Client::new(&url) {
-                if let Err(err) = client.server_features() {
-                    eprintln!("electrum server error {} : {:?}", url, err);
-                    continue;
-                }
-                return Ok(client);
-            };
-        }
+    pub fn get_fee_rate(blocks: usize) -> Result<f32, String> {
+        let wallet_m = UTWALLET
+            .lock()
+            .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
+        let wallet = wallet_m.as_ref().ok_or("The wallet was not initialized")?;
+        let blockchain = Self::get_esplora_blockchain()?;
 
-        Err("None of the electrum servers from the list could be reached. {}".to_string())
+        wallet.runtime.block_on(async {
+            let fee_rate = blockchain
+                .estimate_fee(blocks)
+                .await
+                .map_err(|e| format!("Failed to get fee estimation from electrum: {:?}", e))?;
+
+            Ok(fee_rate.as_sat_per_vb())
+        })
     }
 
-    fn create_wallet() -> Result<Wallet<MemoryDatabase>, String> {
+    fn get_esplora_blockchain() -> Result<EsploraBlockchain, String> {
+        let wallet_m = UTWALLET
+            .lock()
+            .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
+        let wallet = wallet_m.as_ref().ok_or("The wallet was not initialized")?;
+
+        wallet.runtime.block_on(async {
+            for url in ESPLORA_SERVERS {
+                let blockchain = EsploraBlockchain::new(&url, 20);
+                if let Err(err) = blockchain.get_height().await {
+                    eprintln!("esplora server error {} : {:?}", url, err);
+                    continue;
+                }
+                return Ok(blockchain);
+            }
+            Err("None of the esplora servers from the list could be reached. {}".to_string())
+        })
+    }
+
+    fn create_wallet() -> Result<BdkWallet, String> {
         let network = Network::Bitcoin;
         let app_data_path =
             unsafe { QStandardPaths::writable_location(StandardLocation::AppDataLocation) };
@@ -228,6 +262,13 @@ impl BdkWallet {
             .map_err(|e| format!("Failed to format wallet file: {}", e))?;
         write!(output, "{}", json).map_err(|e| format!("Failed to write wallet file: {}", e))?;
 
-        Ok(wallet)
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("Failed to construct async runtime: {}", e))?;
+
+        let bdkwallet = BdkWallet { wallet, runtime };
+
+        Ok(bdkwallet)
     }
 }

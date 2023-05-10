@@ -27,40 +27,44 @@ impl InputEval {
 
         let re = Regex::new(&format!("^{}$", rgx_btc_addr)).map_err(|e| e.to_string())?;
         if re.is_match(addr) {
-            return Ok(Self::Mainnet(addr.to_string()))
+            return Ok(Self::Mainnet(addr.to_string()));
         }
 
         // https://developer.bitcoin.org/devguide/payment_processing.html
-        let re = Regex::new(&format!("^bitcoin:{}([?&](amount|label|message)=([^&]+))*$", rgx_btc_addr)).map_err(|e| e.to_string())?;
+        let re = Regex::new(&format!(
+            "^bitcoin:{}([?&](amount|label|message)=([^&]+))*$",
+            rgx_btc_addr
+        ))
+        .map_err(|e| e.to_string())?;
         if re.is_match(addr) {
-            return Ok(Self::Mainnet(addr.to_string()))
+            return Ok(Self::Mainnet(addr.to_string()));
         }
 
         // https://www.bolt11.org/
         let rgx_bolt11 = r#"^lnbc[a-z0-9]{100,700}$"#;
         let re = Regex::new(&rgx_bolt11).map_err(|e| e.to_string())?;
         if re.is_match(addr) {
-            return Ok(Self::Lightning(addr.to_string()))
+            return Ok(Self::Lightning(addr.to_string()));
         }
 
         // https://bolt12.org/
         let rgx_bolt12 = r#"^lno1[a-z0-9]{55,150}$"#;
         let re = Regex::new(&rgx_bolt12).map_err(|e| e.to_string())?;
         if re.is_match(addr) {
-            return Ok(Self::Lightning(addr.to_string()))
+            return Ok(Self::Lightning(addr.to_string()));
         }
 
-/*
-        let captures = re.captures(addr).map(|captures| {
-            captures
-                .iter()
-                .skip(1)
-                .take(3)
-                .flatten()
-                .map(|c| c.as_str())
-                .collect::<Vec<_>>()
-        });
-*/
+        /*
+                let captures = re.captures(addr).map(|captures| {
+                    captures
+                        .iter()
+                        .skip(1)
+                        .take(3)
+                        .flatten()
+                        .map(|c| c.as_str())
+                        .collect::<Vec<_>>()
+                });
+        */
         Err("Unknown input format".to_string())
     }
 }
@@ -90,7 +94,7 @@ mod tests {
         if let InputEval::Mainnet(addr) = resp {
             assert_eq!(inp, addr);
         } else {
-           panic!("not recognized as regular mainnet address");
+            panic!("not recognized as regular mainnet address");
         }
     }
 
@@ -101,7 +105,7 @@ mod tests {
         if let InputEval::Mainnet(addr) = resp {
             assert_eq!(inp, addr);
         } else {
-           panic!("not recognized as regular mainnet address");
+            panic!("not recognized as regular mainnet address");
         }
     }
 
@@ -112,7 +116,7 @@ mod tests {
         if let InputEval::Mainnet(addr) = resp {
             assert_eq!(inp, addr);
         } else {
-           panic!("not recognized as regular mainnet address");
+            panic!("not recognized as regular mainnet address");
         }
     }
 
@@ -123,7 +127,7 @@ mod tests {
         if let InputEval::Lightning(invoice) = resp {
             assert_eq!(inp, invoice);
         } else {
-           panic!("not recognized as lightning invoice");
+            panic!("not recognized as lightning invoice");
         }
     }
 
@@ -134,7 +138,7 @@ mod tests {
         if let InputEval::Lightning(invoice) = resp {
             assert_eq!(inp, invoice);
         } else {
-           panic!("not recognized as lightning invoice");
+            panic!("not recognized as lightning invoice");
         }
     }
 
@@ -145,7 +149,7 @@ mod tests {
         if let InputEval::Lightning(invoice) = resp {
             assert_eq!(inp, invoice);
         } else {
-           panic!("not recognized as lightning invoice");
+            panic!("not recognized as lightning invoice");
         }
     }
 
@@ -156,8 +160,7 @@ mod tests {
         if let InputEval::Lightning(invoice) = resp {
             assert_eq!(inp, invoice);
         } else {
-           panic!("not recognized as lightning invoice");
+            panic!("not recognized as lightning invoice");
         }
     }
-
 }

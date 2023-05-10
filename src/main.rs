@@ -22,7 +22,9 @@ extern crate qmetaobject;
 use qmetaobject::*;
 use qt_core::{q_standard_paths::StandardLocation, QStandardPaths};
 
+mod constants;
 mod input_eval;
+mod lightning;
 mod qrc;
 mod transactions;
 mod wallet;
@@ -30,10 +32,7 @@ mod wallet;
 use crate::input_eval::InputEval;
 use crate::wallet::BdkWallet;
 
-use bdk::{
-    bitcoin::Address, blockchain::ElectrumBlockchain, electrum_client::ElectrumApi,
-    wallet::AddressIndex,
-};
+use bdk::{bitcoin::Address, wallet::AddressIndex};
 use qrcode_png::{Color, QrCode, QrCodeEcc};
 use std::{env, fs::create_dir_all, path::PathBuf, str::FromStr};
 
@@ -51,7 +50,7 @@ struct Greeter {
     ),
     estimate_fee: qt_method!(
         fn estimate_fee(&self) -> QString {
-            format!("{}", log_err(get_fee_rate(1))).into()
+            format!("{}", log_err(BdkWallet::get_fee_rate(1))).into()
         }
     ),
     send: qt_method!(
@@ -91,7 +90,7 @@ struct Greeter {
 }
 
 impl Greeter {
-    fn payto(&self, addr: &str, amount: &str, fee_rate: &str) -> Result<String, String> {
+    fn payto(&self, addr: &str, amount: &str, fee_rate: &str) -> Result<(), String> {
         let recipient = Address::from_str(addr)
             .map_err(|e| format!("Failed to parse address {} : {}", addr, e))?;
         let amount = parse_satoshis(amount)?;
@@ -156,19 +155,6 @@ fn log_err_or<T>(res: Result<T, String>, fallback: T) -> T {
             fallback
         }
     }
-}
-
-fn get_fee_rate(blocks: usize) -> Result<f32, String> {
-    let client = BdkWallet::get_electrum_server()?;
-    let blockchain = ElectrumBlockchain::from(client);
-
-    let fee_rate = blockchain
-        .estimate_fee(blocks)
-        .map_err(|e| format!("Failed to get fee estimation from electrum: {:?}", e))?;
-
-    let fee_rate = bdk::FeeRate::from_btc_per_kvb(fee_rate as f32); // according to the documentation, this should not be needed
-
-    Ok(fee_rate.as_sat_per_vb())
 }
 
 /// Convert a string with a value in Bitcoin to Satoshis
