@@ -24,7 +24,6 @@ import Greeter 1.0
 import TransactionModel 1.0
 
 // for widgets visit:
-// https://api-docs.ubports.com/sdk/apps/qml/Ubuntu.Components/TextField.html
 // https://doc.qt.io/qt-6/qtquick-controls2-qmlmodule.html
 
 Page {
@@ -87,19 +86,16 @@ Page {
 
         Label {
             id: label_send_address
-            text: i18n.tr('Address or Invoice')
+            text: i18n.tr('Address')
         }
         
         TextField {
             id: send_address
             placeholderText: i18n.tr('Address')
             Layout.fillWidth: true
-            onAccepted: {
-                const addr_and_amount = greeter.evaluate_address_input(send_address.text);
-                const words = addr_and_amount.split('#');
-               send_address.text = words[0];
-               send_amount.text = words[1];
-            }
+//            onEditingFinished: {
+//                greeter.evaluate_address_input(send_address.text);
+//            }
         }
         
         Label {

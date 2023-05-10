@@ -119,14 +119,10 @@ impl BdkWallet {
             .get_balance()
             .map_err(|e| format!("Unable to determine the balance: {:?}", e))?;
         println!("{:?}", bal);
-
-        let price = bitcoin_price::get_average_exchange_spot_price() as f32;
-
         Ok(format!(
-            "Balance: {} (+{}) BTC ({:.2} USD)",
+            "Balance: {} (+{}) BTC",
             bal.confirmed as f32 / 100_000_000.0,
-            (bal.immature + bal.trusted_pending + bal.untrusted_pending) as f32 / 100_000_000.0,
-            bal.confirmed as f32 / 100_000_000.0 * price
+            (bal.immature + bal.trusted_pending + bal.untrusted_pending) as f32 / 100_000_000.0
         ))
     }
 

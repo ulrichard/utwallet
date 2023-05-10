@@ -82,11 +82,9 @@ struct Greeter {
         }
     ),
     evaluate_address_input: qt_method!(
-        fn evaluate_address_input(&mut self, addr: String) -> QString {
-            if !addr.trim().is_empty() {
-                log_err(self.evaluate_input(addr.trim())).into()
-            } else {
-                " # ".into()
+        fn evaluate_address_input(&mut self, addr: String) {
+            if !addr.is_empty() {
+                log_err(self.evaluate_input(&addr));
             }
         }
     ),
@@ -106,14 +104,10 @@ impl Greeter {
     }
 
     fn evaluate_input(&self, addr: &str) -> Result<String, String> {
-        let eval = InputEval::evaluate(addr)?;
-        eprintln!("{:?}", eval);
-        let (addr, amount) = match eval {
-            InputEval::Mainnet(addr, amount) => (addr, amount),
-            InputEval::Lightning(invoice, amount) => (invoice, amount),
-        };
-
-        Ok(format!("{}#{}", addr, amount as f32 / 100000000.0))
+        match InputEval::evaluate(addr)? {
+            InputEval::Mainnet(addr) => Ok(addr),
+            InputEval::Lightning(invoice) => Ok(invoice),
+        }
     }
 
     fn get_receiving_address(&self) -> Result<String, String> {
