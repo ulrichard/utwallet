@@ -24,15 +24,13 @@ use qt_core::{q_standard_paths::StandardLocation, QStandardPaths};
 
 mod constants;
 mod input_eval;
-mod lightning;
 mod qrc;
-mod transactions;
 mod wallet;
 
 use crate::input_eval::InputEval;
 use crate::wallet::BdkWallet;
 
-use bdk::{bitcoin::Address, wallet::AddressIndex};
+use ldk_node::bitcoin::Address;
 use qrcode_png::{Color, QrCode, QrCodeEcc};
 use std::{env, fs::create_dir_all, path::PathBuf, str::FromStr};
 
@@ -45,29 +43,40 @@ struct Greeter {
 
     update_balance: qt_method!(
         fn update_balance(&mut self) -> QString {
-            println!("qt_method: update_balance()");
             log_err_or(BdkWallet::get_balance(), "balance unavailable".to_string()).into()
         }
     ),
-    estimate_fee: qt_method!(
-        fn estimate_fee(&self) -> QString {
-            println!("qt_method: estimate_fee()");
-            format!("{}", log_err(BdkWallet::get_fee_rate(1))).into()
-        }
-    ),
     send: qt_method!(
-        fn send(&mut self, addr: String, amount: String, fee_rate: String) {
-            println!("qt_method: send()");
-            if addr.is_empty() || amount.is_empty() || fee_rate.is_empty() {
+        fn send(&mut self, addr: String, amount: String) {
+            if addr.is_empty() || amount.is_empty() {
                 eprintln!("all the fields need to be filled");
             } else {
-                log_err(self.payto(&addr, &amount, &fee_rate));
+                log_err(self.payto(&addr, &amount));
             }
+        }
+    ),
+    channel_open: qt_method!(
+        fn channel_open(&mut self, amount: String) {
+            if amount.is_empty() {
+                eprintln!("the amount field needs to be filled");
+            } else {
+                log_err(self.channel_new(&amount));
+            }
+        }
+    ),
+    request: qt_method!(
+        fn request(&mut self, amount: String, desc: String) -> QString {
+            let invoice = log_err(self.invoice(&amount, &desc));
+            self.receiving_address = invoice.clone().into();
+            format!(
+                "file://{}",
+                log_err(self.generate_qr(&invoice)).to_str().unwrap()
+            )
+            .into()
         }
     ),
     address: qt_method!(
         fn address(&mut self) -> QString {
-            println!("qt_method: address()");
             let addr = log_err(self.get_receiving_address());
             self.receiving_address = addr.clone().into();
             addr.into()
@@ -75,7 +84,6 @@ struct Greeter {
     ),
     address_qr: qt_method!(
         fn address_qr(&mut self) -> QString {
-            println!("qt_method: address_qr()");
             let addr = log_err(self.get_receiving_address());
             self.receiving_address = addr.clone().into();
             format!(
@@ -96,16 +104,28 @@ struct Greeter {
 }
 
 impl Greeter {
-    fn payto(&self, addr: &str, amount: &str, fee_rate: &str) -> Result<(), String> {
+    fn payto(&self, addr: &str, amount: &str) -> Result<(), String> {
         let recipient = Address::from_str(addr)
             .map_err(|e| format!("Failed to parse address {} : {}", addr, e))?;
         let amount = parse_satoshis(amount)?;
-        let fee_rate = bdk::FeeRate::from_sat_per_vb(
-            f32::from_str(fee_rate)
-                .map_err(|e| format!("Failed to parse fee_rate {} : {}", fee_rate, e))?,
-        );
 
-        BdkWallet::payto(recipient, amount, fee_rate)
+        BdkWallet::payto(recipient, amount)?;
+        Ok(())
+    }
+
+    fn channel_new(&self, amount: &str) -> Result<(), String> {
+        let amount = parse_satoshis(amount)?;
+        BdkWallet::channel_open(amount)?;
+        Ok(())
+    }
+
+    fn invoice(&self, amount: &str, desc: &str) -> Result<String, String> {
+        let amount = if amount.is_empty() {
+            None
+        } else {
+            Some(parse_satoshis(amount)?)
+        };
+        BdkWallet::invoice(amount, desc)
     }
 
     fn evaluate_input(&self, addr: &str) -> Result<String, String> {
@@ -116,7 +136,7 @@ impl Greeter {
     }
 
     fn get_receiving_address(&self) -> Result<String, String> {
-        let addr = BdkWallet::get_address(AddressIndex::New)?.to_string();
+        let addr = BdkWallet::get_address()?.to_string();
         Ok(addr)
     }
 
@@ -187,16 +207,10 @@ fn main() {
     QQuickStyle::set_style("Suru");
     qrc::load();
     qml_register_type::<Greeter>(cstr!("Greeter"), 1, 0, cstr!("Greeter"));
-    qml_register_type::<transactions::TransactionModel>(
-        cstr!("TransactionModel"),
-        1,
-        0,
-        cstr!("TransactionModel"),
-    );
     let mut engine = QmlEngine::new();
 
-    println!("Initializing the wallet singleton.");
-    log_err(BdkWallet::init_wallet());
+    println!("Initializing the node singleton.");
+    log_err(BdkWallet::init_node());
 
     println!("Loading file /qml/utwallet.qml.");
     engine.load_file("qrc:/qml/utwallet.qml".into());
