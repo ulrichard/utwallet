@@ -194,13 +194,18 @@ impl BdkWallet {
     }
 
     fn get_esplora_blockchain() -> Result<EsploraBlockchain, String> {
+        println!("trying to connect to an Esplora server");
         let wallet_m = UTWALLET
             .lock()
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
+        println!("Accessing the wallet singleton");
         let wallet = wallet_m.as_ref().ok_or("The wallet was not initialized")?;
 
+        println!("Entering async block");
         wallet.runtime.block_on(async {
+            println!("Entered async block");
             for url in ESPLORA_SERVERS {
+                println!("Connecting to {}", url);
                 let blockchain = EsploraBlockchain::new(&url, 20);
                 if let Err(err) = blockchain.get_height().await {
                     eprintln!("esplora server error {} : {:?}", url, err);
@@ -262,10 +267,12 @@ impl BdkWallet {
             .map_err(|e| format!("Failed to format wallet file: {}", e))?;
         write!(output, "{}", json).map_err(|e| format!("Failed to write wallet file: {}", e))?;
 
+        println!("Constructing the async runtime");
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .map_err(|e| format!("Failed to construct async runtime: {}", e))?;
+        println!("Constructed the async runtime");
 
         let bdkwallet = BdkWallet { wallet, runtime };
 

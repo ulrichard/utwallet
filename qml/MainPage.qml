@@ -120,7 +120,7 @@ Page {
             width: units.gu(20)
             
             Component.onCompleted: {
-                send_fee.text = greeter.estimate_fee();
+                //send_fee.text = greeter.estimate_fee();
             }
         }
 

@@ -45,16 +45,19 @@ struct Greeter {
 
     update_balance: qt_method!(
         fn update_balance(&mut self) -> QString {
+            println!("qt_method: update_balance()");
             log_err_or(BdkWallet::get_balance(), "balance unavailable".to_string()).into()
         }
     ),
     estimate_fee: qt_method!(
         fn estimate_fee(&self) -> QString {
+            println!("qt_method: estimate_fee()");
             format!("{}", log_err(BdkWallet::get_fee_rate(1))).into()
         }
     ),
     send: qt_method!(
         fn send(&mut self, addr: String, amount: String, fee_rate: String) {
+            println!("qt_method: send()");
             if addr.is_empty() || amount.is_empty() || fee_rate.is_empty() {
                 eprintln!("all the fields need to be filled");
             } else {
@@ -64,6 +67,7 @@ struct Greeter {
     ),
     address: qt_method!(
         fn address(&mut self) -> QString {
+            println!("qt_method: address()");
             let addr = log_err(self.get_receiving_address());
             self.receiving_address = addr.clone().into();
             addr.into()
@@ -71,6 +75,7 @@ struct Greeter {
     ),
     address_qr: qt_method!(
         fn address_qr(&mut self) -> QString {
+            println!("qt_method: address_qr()");
             let addr = log_err(self.get_receiving_address());
             self.receiving_address = addr.clone().into();
             format!(
@@ -82,6 +87,7 @@ struct Greeter {
     ),
     evaluate_address_input: qt_method!(
         fn evaluate_address_input(&mut self, addr: String) {
+            println!("qt_method: evaluate_address_input()");
             if !addr.is_empty() {
                 log_err(self.evaluate_input(&addr));
             }
@@ -189,9 +195,12 @@ fn main() {
     );
     let mut engine = QmlEngine::new();
 
+    println!("Initializing the wallet singleton.");
     log_err(BdkWallet::init_wallet());
 
+    println!("Loading file /qml/utwallet.qml.");
     engine.load_file("qrc:/qml/utwallet.qml".into());
+    println!("Entering the QML main loop.");
     engine.exec();
 }
 
