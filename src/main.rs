@@ -22,20 +22,17 @@ extern crate qmetaobject;
 use qmetaobject::*;
 use qt_core::{q_standard_paths::StandardLocation, QStandardPaths};
 
+mod constants;
 mod input_eval;
 mod qrc;
-mod transactions;
 mod wallet;
 
-use crate::input_eval::InputEval;
+use crate::input_eval::{parse_satoshis, InputEval, InputNetwork};
 use crate::wallet::BdkWallet;
 
-use bdk::{
-    bitcoin::Address, blockchain::ElectrumBlockchain, electrum_client::ElectrumApi,
-    wallet::AddressIndex,
-};
+//use ldk_node::bitcoin::Address;
 use qrcode_png::{Color, QrCode, QrCodeEcc};
-use std::{env, fs::create_dir_all, path::PathBuf, str::FromStr};
+use std::{env, fs::create_dir_all, path::PathBuf /*, str::FromStr*/};
 
 use gettextrs::{bindtextdomain, textdomain};
 
@@ -49,18 +46,33 @@ struct Greeter {
             log_err_or(BdkWallet::get_balance(), "balance unavailable".to_string()).into()
         }
     ),
-    estimate_fee: qt_method!(
-        fn estimate_fee(&self) -> QString {
-            format!("{}", log_err(get_fee_rate(1))).into()
+    send: qt_method!(
+        fn send(&mut self, addr: String, amount: String, desc: String) {
+            if addr.is_empty() {
+                eprintln!("at least the address field needs to be filled");
+            } else {
+                log_err(self.payto(&addr, &amount, &desc));
+            }
         }
     ),
-    send: qt_method!(
-        fn send(&mut self, addr: String, amount: String, fee_rate: String) {
-            if addr.is_empty() || amount.is_empty() || fee_rate.is_empty() {
-                eprintln!("all the fields need to be filled");
+    channel_open: qt_method!(
+        fn channel_open(&mut self, amount: String) {
+            if amount.is_empty() {
+                eprintln!("the amount field needs to be filled");
             } else {
-                log_err(self.payto(&addr, &amount, &fee_rate));
+                log_err(self.channel_new(&amount));
             }
+        }
+    ),
+    request: qt_method!(
+        fn request(&mut self, amount: String, desc: String) -> QString {
+            let invoice = log_err(self.invoice(&amount, &desc));
+            self.receiving_address = invoice.clone().into();
+            format!(
+                "file://{}",
+                log_err(self.generate_qr(&invoice)).to_str().unwrap()
+            )
+            .into()
         }
     ),
     address: qt_method!(
@@ -82,42 +94,61 @@ struct Greeter {
         }
     ),
     evaluate_address_input: qt_method!(
-        fn evaluate_address_input(&mut self, addr: String) -> QString {
-            if !addr.trim().is_empty() {
-                log_err(self.evaluate_input(addr.trim())).into()
-            } else {
-                " # ".into()
-            }
+        fn evaluate_address_input(
+            &mut self,
+            addr: String,
+            amount: String,
+            desc: String,
+        ) -> QString {
+            log_err(self.evaluate_input(&addr, &amount, &desc)).into()
         }
     ),
 }
 
 impl Greeter {
-    fn payto(&self, addr: &str, amount: &str, fee_rate: &str) -> Result<String, String> {
-        let recipient = Address::from_str(addr)
-            .map_err(|e| format!("Failed to parse address {} : {}", addr, e))?;
-        let amount = parse_satoshis(amount)?;
-        let fee_rate = bdk::FeeRate::from_sat_per_vb(
-            f32::from_str(fee_rate)
-                .map_err(|e| format!("Failed to parse fee_rate {} : {}", fee_rate, e))?,
-        );
+    fn payto(&self, addr: &str, bitcoins: &str, desc: &str) -> Result<(), String> {
+        let satoshis = if bitcoins.is_empty() {
+            None
+        } else {
+            Some(parse_satoshis(bitcoins)?)
+        };
+        let inpeval = InputEval::evaluate(addr, bitcoins, desc)?;
+        match inpeval.network {
+            InputNetwork::Mainnet(addr) => {
+                if let Some(satoshis) = satoshis {
+                    Ok(BdkWallet::payto(addr, satoshis)?.to_string())
+                } else {
+                    Err("Amount field needs to be filled!".to_string())
+                }
+            }
+            InputNetwork::Lightning(invoice) => BdkWallet::pay_invoice(&invoice, satoshis),
+        }?;
 
-        BdkWallet::payto(recipient, amount, fee_rate)
+        Ok(())
     }
 
-    fn evaluate_input(&self, addr: &str) -> Result<String, String> {
-        let eval = InputEval::evaluate(addr)?;
-        eprintln!("{:?}", eval);
-        let (addr, amount) = match eval {
-            InputEval::Mainnet(addr, amount) => (addr, amount),
-            InputEval::Lightning(invoice, amount) => (invoice, amount),
-        };
+    fn channel_new(&self, amount: &str) -> Result<(), String> {
+        let amount = parse_satoshis(amount)?;
+        BdkWallet::channel_open(amount)?;
+        Ok(())
+    }
 
-        Ok(format!("{}#{}", addr, amount as f32 / 100000000.0))
+    fn invoice(&self, amount: &str, desc: &str) -> Result<String, String> {
+        let amount = if amount.is_empty() {
+            None
+        } else {
+            Some(parse_satoshis(amount)?)
+        };
+        BdkWallet::create_invoice(amount, desc)
+    }
+
+    fn evaluate_input(&self, addr: &str, bitcoins: &str, desc: &str) -> Result<String, String> {
+        let inpeval = InputEval::evaluate(addr, bitcoins, desc)?;
+        inpeval.gui_csv()
     }
 
     fn get_receiving_address(&self) -> Result<String, String> {
-        let addr = BdkWallet::get_address(AddressIndex::New)?.to_string();
+        let addr = BdkWallet::get_address()?.to_string();
         Ok(addr)
     }
 
@@ -164,29 +195,6 @@ fn log_err_or<T>(res: Result<T, String>, fallback: T) -> T {
     }
 }
 
-fn get_fee_rate(blocks: usize) -> Result<f32, String> {
-    let client = BdkWallet::get_electrum_server()?;
-    let blockchain = ElectrumBlockchain::from(client);
-
-    let fee_rate = blockchain
-        .estimate_fee(blocks)
-        .map_err(|e| format!("Failed to get fee estimation from electrum: {:?}", e))?;
-
-    let fee_rate = bdk::FeeRate::from_btc_per_kvb(fee_rate as f32); // according to the documentation, this should not be needed
-
-    Ok(fee_rate.as_sat_per_vb())
-}
-
-/// Convert a string with a value in Bitcoin to Satoshis
-fn parse_satoshis(amount: &str) -> Result<u64, String> {
-    if amount.is_empty() {
-        return Ok(0);
-    }
-    let amount = f64::from_str(amount)
-        .map_err(|e| format!("Failed to parse the satoshis from {:?} : {}", amount, e))?;
-    Ok((amount * 100_000_000.0) as u64)
-}
-
 fn main() {
     init_gettext();
     unsafe {
@@ -201,17 +209,14 @@ fn main() {
     QQuickStyle::set_style("Suru");
     qrc::load();
     qml_register_type::<Greeter>(cstr!("Greeter"), 1, 0, cstr!("Greeter"));
-    qml_register_type::<transactions::TransactionModel>(
-        cstr!("TransactionModel"),
-        1,
-        0,
-        cstr!("TransactionModel"),
-    );
     let mut engine = QmlEngine::new();
 
-    log_err(BdkWallet::init_wallet());
+    println!("Initializing the node singleton.");
+    log_err(BdkWallet::init_node());
 
+    println!("Loading file /qml/utwallet.qml.");
     engine.load_file("qrc:/qml/utwallet.qml".into());
+    println!("Entering the QML main loop.");
     engine.exec();
 }
 

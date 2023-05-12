@@ -21,10 +21,8 @@ import QtQuick.Layouts 1.3
 import Qt.labs.settings 1.0
 
 import Greeter 1.0
-import TransactionModel 1.0
 
 // for widgets visit:
-// https://api-docs.ubports.com/sdk/apps/qml/Ubuntu.Components/TextField.html
 // https://doc.qt.io/qt-6/qtquick-controls2-qmlmodule.html
 
 Page {
@@ -36,31 +34,6 @@ Page {
         id: greeter
     }
         
-    TransactionModel {
-        id: transactionsModel
-    }
-                
-    Component {
-        id: transactionsDelegate
-        RowLayout {
-            visible: true
-            height: units.gu(3)
-                Label {
-                    id: label1
-                    text: date
-                    verticalAlignment: Text.AlignVCenter
-                    font.pixelSize: 16
-                    width: units.gu(16)
-                }
-                Label {
-                    id: label2
-                    text: amount
-                    verticalAlignment: Text.AlignVCenter
-                    font.pixelSize: 16
-                }
-        }
-    }
-
     anchors.fill: parent
 
     header: PageHeader {
@@ -92,14 +65,11 @@ Page {
         
         TextField {
             id: send_address
-            placeholderText: i18n.tr('Address')
+            placeholderText: i18n.tr('Address or Invoice')
             Layout.fillWidth: true
-            onAccepted: {
-                const addr_and_amount = greeter.evaluate_address_input(send_address.text);
-                const words = addr_and_amount.split('#');
-               send_address.text = words[0];
-               send_amount.text = words[1];
-            }
+//            onEditingFinished: {
+//                greeter.evaluate_address_input(send_address.text, send_amount.text, desc_txt.text);
+//            }
         }
         
         Label {
@@ -114,24 +84,51 @@ Page {
         }
 
         Label {
-            id: label_send_fee
-            text: i18n.tr('FeeRate [sat/vbyte]')
+            id: label_desc_txt
+            text: i18n.tr('Description')
         }
         
         TextField {
-            id: send_fee
-            placeholderText: i18n.tr('FeeRate [sat/vbyte]')
+            id: desc_txt
+            placeholderText: i18n.tr('lunch split')
             width: units.gu(20)
-            
-            Component.onCompleted: {
-                send_fee.text = greeter.estimate_fee();
-            }
         }
 
         Button {
             text: i18n.tr('Send')
             onClicked: {
-                greeter.send(send_address.text, send_amount.text, send_fee.text);
+                greeter.send(send_address.text, send_amount.text, desc_txt.text);
+            }
+        }
+
+        Button {
+            text: i18n.tr('Evaluate Address or Invoice')
+            onClicked: {
+                var txt = greeter.evaluate_address_input(send_address.text, send_amount.text, desc_txt.text);
+                var words = txt.split(";");
+                send_address.text = words[0];
+                send_amount.text = words[1];
+                desc_txt.text = words[2];
+            }
+        }
+
+        Button {
+            text: i18n.tr('Channel Open')
+            onClicked: {
+                greeter.channel_open(send_amount.text);
+            }
+        }
+
+        Button {
+            text: i18n.tr('Create Invoice')
+            onClicked: {
+                main_timer.stop();
+
+                receive_qr_code.source = greeter.request(send_amount.text, desc_txt.text);
+                label_receive_addr.text = greeter.receiving_address;
+
+                main_timer.interval = 60000;
+                main_timer.start();
             }
         }
 
@@ -169,13 +166,6 @@ Page {
 
         }
         
-        ListView {
-            id: ubuntuListView
-            Layout.fillHeight: true
-            model: transactionsModel
-            delegate: transactionsDelegate
-        }
-        
         Timer {
             id: main_timer;
             interval: 2000;
@@ -187,9 +177,8 @@ Page {
                 
                 header.title = greeter.update_balance();
                 
-                transactionsModel.update_transactions();
-                
                 receive_qr_code.source = greeter.address_qr();
+                label_receive_addr.text = greeter.receiving_address;
 
                 main_timer.interval = 20000;
                 main_timer.start();
