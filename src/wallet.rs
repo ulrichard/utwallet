@@ -20,7 +20,7 @@ use crate::constants::{ESPLORA_SERVERS, LN_ULR};
 
 use ldk_node::bip39::Mnemonic;
 use ldk_node::bitcoin::{secp256k1::PublicKey, Address, /*Network,*/ Txid};
-//use ldk_node::lightning_invoice::Invoice;
+use ldk_node::lightning_invoice::Invoice;
 use ldk_node::{Builder, Node};
 use rand_core::{OsRng, RngCore};
 use std::{fs, fs::create_dir_all, fs::File, io::Write, path::PathBuf, str::FromStr, sync::Mutex};
@@ -73,7 +73,7 @@ impl BdkWallet {
         Ok(())
     }
 
-    pub fn invoice(amount: Option<u64>, desc: &str) -> Result<String, String> {
+    pub fn create_invoice(amount: Option<u64>, desc: &str) -> Result<String, String> {
         let node_m = UTNODE
             .lock()
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
@@ -92,6 +92,37 @@ impl BdkWallet {
         .map_err(|e| format!("Failed to create an invoice: {:?}", e))?;
 
         Ok(invoice.to_string())
+    }
+
+    pub fn pay_invoice(invoice: &Invoice, amount: Option<u64>) -> Result<String, String> {
+        let node_m = UTNODE
+            .lock()
+            .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
+        let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
+
+        let ph = match (invoice.amount_milli_satoshis(), amount) {
+            (Some(_amount), None) => node
+                .send_payment(invoice)
+                .map_err(|e| format!("Unable to pay the invoice: {:?}", e)),
+            (Some(amount_inv), Some(amount_field)) => {
+                if (amount_inv as i64 - amount_field as i64 * 1_000).abs() > 1_000_000 {
+                    Err(format!(
+                        "amount of the invoice {} and in the field {} don't match",
+                        amount_inv,
+                        amount_field * 1_000
+                    ))
+                } else {
+                    node.send_payment(invoice)
+                        .map_err(|e| format!("Unable to pay the invoice: {:?}", e))
+                }
+            }
+            (None, Some(amount)) => node
+                .send_payment_using_amount(invoice, amount * 1_000)
+                .map_err(|e| format!("Unable to pay the invoice with {} sats: {:?}", amount, e)),
+            (None, None) => Err("No amount to pay the invoice!".to_string()),
+        }?;
+
+        Ok(format!("{:?}", ph))
     }
 
     pub fn get_address() -> Result<Address, String> {
@@ -146,11 +177,18 @@ impl BdkWallet {
                 )
             })?
         /*
-        } else if wallet_file.exists() {
-            let json = fs::read_to_string(&wallet_file)
-                .map_err(|e| format!("Failed to read the wallet file {:?}: {}", wallet_file, e))?;
-            serde_json::from_str(&json).unwrap()
-            let desc: (String, String) = json;
+                } else if wallet_file.exists() {
+                    // older versions stored a pair of descriptors
+                    let json = fs::read_to_string(&wallet_file)
+                        .map_err(|e| format!("Failed to read the wallet file {:?}: {}", wallet_file, e))?;
+                    serde_json::from_str(&json).unwrap()
+                    let desc: (String, String) = json;
+                    let rgx_descriptor_wpkh_xprv = r#"^wpkh\((xprv[a-zA-Z0-9]+)/[0-9]+/\*\)$"#;
+                    let re = Regex::new(rgx_descriptor_wpkh_xprv).unwrap();
+                    let capt = re.captures(&desc.0).unwrap();
+                    let xpriv = capt.get(1).unwrap().as_str();
+                    let xpriv = ExtendedPrivKey::from_str(xpriv).unwrap();
+                    // there seems to be no way to get from an ExtendedPrivKey to a mnemonic
         */
         } else {
             // Generate fresh mnemonic
@@ -188,21 +226,27 @@ impl BdkWallet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    //use ldk_node::bip39::Mnemonic;
-    use ldk_node::bitcoin::secp256k1::PublicKey;
-    //use ldk_node::lightning_invoice::Invoice;
-    //use ldk_node::Builder;
+    use ldk_node::bitcoin::{secp256k1::PublicKey, util::bip32::ExtendedPrivKey, Network};
+    use regex::Regex;
     use std::str::FromStr;
 
-    /*
     #[test]
     fn test_descriptor_to_mnemonic() {
         let mnemonic = Mnemonic::parse("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about").unwrap();
-        let xkey: ExtendedKey = mnemonic.into_extended_key().unwrap();
-        let xprv = xkey.into_xprv(network).unwrap();
-        assert_eq!(xprv.to_string(), "");
+        let seed_bytes = mnemonic.to_seed("");
+        let xprv = ExtendedPrivKey::new_master(Network::Bitcoin, &seed_bytes).unwrap();
+        let desc = format!("wpkh({}/0/*)", xprv);
+        assert_eq!(desc, "wpkh(xprv9s21ZrQH143K3GJpoapnV8SFfukcVBSfeCficPSGfubmSFDxo1kuHnLisriDvSnRRuL2Qrg5ggqHKNVpxR86QEC8w35uxmGoggxtQTPvfUu/0/*)");
+        let rgx_descriptor_wpkh_xprv = r#"^wpkh\((xprv[a-zA-Z0-9]+)/[0-9]+/\*\)$"#;
+        let re = Regex::new(rgx_descriptor_wpkh_xprv).unwrap();
+        assert!(re.is_match(&desc));
+        let capt = re.captures(&desc).unwrap();
+        assert_eq!(capt.len(), 2);
+        let xpriv = capt.get(1).unwrap().as_str();
+        assert_eq!(xpriv, "xprv9s21ZrQH143K3GJpoapnV8SFfukcVBSfeCficPSGfubmSFDxo1kuHnLisriDvSnRRuL2Qrg5ggqHKNVpxR86QEC8w35uxmGoggxtQTPvfUu");
+        let xpriv = ExtendedPrivKey::from_str(xpriv).unwrap();
+        assert_eq!(xprv, xpriv);
     }
-    */
 
     #[test]
     fn test_init_node() {

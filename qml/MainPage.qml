@@ -60,15 +60,15 @@ Page {
 
         Label {
             id: label_send_address
-            text: i18n.tr('Address')
+            text: i18n.tr('Address or Invoice')
         }
         
         TextField {
             id: send_address
-            placeholderText: i18n.tr('Address')
+            placeholderText: i18n.tr('Address or Invoice')
             Layout.fillWidth: true
 //            onEditingFinished: {
-//                greeter.evaluate_address_input(send_address.text);
+//                greeter.evaluate_address_input(send_address.text, send_amount.text, desc_txt.text);
 //            }
         }
         
@@ -97,7 +97,18 @@ Page {
         Button {
             text: i18n.tr('Send')
             onClicked: {
-                greeter.send(send_address.text, send_amount.text);
+                greeter.send(send_address.text, send_amount.text, desc_txt.text);
+            }
+        }
+
+        Button {
+            text: i18n.tr('Evaluate Address or Invoice')
+            onClicked: {
+                var txt = greeter.evaluate_address_input(send_address.text, send_amount.text, desc_txt.text);
+                var words = txt.split(";");
+                send_address.text = words[0];
+                send_amount.text = words[1];
+                desc_txt.text = words[2];
             }
         }
 
@@ -109,7 +120,7 @@ Page {
         }
 
         Button {
-            text: i18n.tr('Request')
+            text: i18n.tr('Create Invoice')
             onClicked: {
                 main_timer.stop();
 
