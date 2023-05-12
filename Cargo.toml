@@ -18,6 +18,7 @@ qrcode-png = "0.4"
 chrono = "0.4"
 regex = "1"
 rand_core = "0.6"
+lnurl-rs = "0.2"
 
 [build-dependencies]
 cpp_build = "0.5"

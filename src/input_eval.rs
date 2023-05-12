@@ -16,6 +16,7 @@
 
 use ldk_node::bitcoin::Address;
 use ldk_node::lightning_invoice::{Invoice, InvoiceDescription, SignedRawInvoice};
+use lnurl::{api::LnUrlResponse, lightning_address::LightningAddress, lnurl::LnUrl, Builder};
 use regex::Regex;
 use std::{collections::HashMap, str::FromStr};
 
@@ -80,6 +81,12 @@ impl InputEval {
         let rgx_bolt11 = r#"^lnbc[a-z0-9]{100,700}$"#;
         let re = Regex::new(&rgx_bolt11).map_err(|e| e.to_string())?;
         if re.is_match(recipient) {
+            let invoice = str::parse::<Invoice>(&recipient).map_err(|e| e.to_string())?;
+            let satoshis = if let Some(msat) = invoice.amount_milli_satoshis() {
+                Some(msat / 1_000)
+            } else {
+                satoshis
+            };
             return Self::lightning(recipient, satoshis, descr);
         }
 
@@ -90,17 +97,28 @@ impl InputEval {
             return Err("BOLT12 is not supported yet".to_string());
         }
 
-        /*
-                let captures = re.captures(recipient).map(|captures| {
-                    captures
-                        .iter()
-                        .skip(1)
-                        .take(3)
-                        .flatten()
-                        .map(|c| c.as_str())
-                        .collect::<Vec<_>>()
-                });
-        */
+        // LNURL https://github.com/lnurl/luds
+        if recipient.starts_with("LNURL") || recipient.starts_with("lightning:LNURL") {
+            let recipient = recipient.replace("lightning:", "");
+            let lnu = LnUrl::from_str(&recipient).map_err(|e| e.to_string())?;
+            let url = lnu.url.as_str();
+            return Self::ln_url(&url, satoshis, descr);
+        }
+
+        // LNURL https://github.com/lnurl/luds
+        if recipient.starts_with("https://") {
+            return Self::ln_url(&recipient, satoshis, descr);
+        }
+
+        // https://coincharge.io/lnurl/
+        let rgx_lnaddr = r#"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,6}$"#;
+        let re = Regex::new(&rgx_lnaddr).map_err(|e| e.to_string())?;
+        if re.is_match(recipient) {
+            let lnaddr = LightningAddress::from_str(&recipient).map_err(|e| e.to_string())?;
+            let url = lnaddr.lnurlp_url().as_str().to_string();
+            return Self::ln_url(&url, satoshis, descr);
+        }
+
         Err("Unknown input format".to_string())
     }
 
@@ -139,6 +157,36 @@ impl InputEval {
             satoshis,
             description,
         })
+    }
+
+    fn ln_url(url: &str, satoshis: Option<u64>, description: String) -> Result<Self, String> {
+        let client = Builder::default()
+            .build_blocking()
+            .map_err(|e| e.to_string())?;
+        let resp = client.make_request(url).map_err(|e| e.to_string())?;
+        match resp {
+            LnUrlResponse::LnUrlPayResponse(pay) => {
+                let msats = if let Some(sats) = satoshis {
+                    if sats * 1_000 < pay.min_sendable || sats * 1_000 > pay.max_sendable {
+                        return Err(format!(
+                            "payment {} is not between {} and {}",
+                            sats * 1_000,
+                            pay.min_sendable,
+                            pay.max_sendable
+                        ));
+                    }
+                    sats * 1_000
+                } else {
+                    pay.min_sendable
+                };
+                let resp = client.get_invoice(&pay, msats).map_err(|e| e.to_string())?;
+                let invoice = resp.invoice();
+                Self::lightning(&invoice.to_string(), Some(msats / 1_000), description)
+            }
+            LnUrlResponse::LnUrlWithdrawResponse(_) | LnUrlResponse::LnUrlChannelResponse(_) => {
+                Err("LNURL withdraw and channel are not implemented yet".to_string())
+            }
+        }
     }
 
     /// generate a comma separated value string to pass to the QML GUI
@@ -310,5 +358,76 @@ mod tests {
         } else {
             panic!("not recognized as lightning invoice");
         }
+    }
+
+    #[test]
+    fn test_lnurl_https() {
+        let inp = "https://opreturnbot.com/.well-known/lnurlp/ben";
+        let resp = InputEval::evaluate(inp, "", "").unwrap();
+        if let InputNetwork::Lightning(invoice) = resp.network {
+            assert_eq!(*"lnbc", invoice.to_string()[..4]);
+        } else {
+            panic!("not recognized as lightning invoice");
+        }
+        assert_eq!(resp.satoshis, Some(1));
+        assert_eq!(resp.description, "");
+    }
+
+    #[test]
+    fn test_lnurl() {
+        let inp = "LNURL1DP68GURN8GHJ7MR9VAJKUEPWD3HXY6T5WVHXXMMD9AKXUATJD3JX2ANFVDJJ7CTSDYHHVV30D3H82UNV9AF5ZMJEWFV82CJ3D4R8G42STP2N272V23K550MSD9HR6VFJYESK6MM4DE6R6VPWX5NXGATJV96XJMMW85CNQVPSV48PVT";
+        let resp = InputEval::evaluate(inp, "", "").unwrap();
+        if let InputNetwork::Lightning(invoice) = resp.network {
+            assert_eq!(*"lnbc", invoice.to_string()[..4]);
+        } else {
+            panic!("not recognized as lightning invoice");
+        }
+        assert!(
+            resp.satoshis.unwrap() > 1_000 && resp.satoshis.unwrap() < 3_000,
+            "satoshis: {}",
+            resp.satoshis.unwrap()
+        );
+        assert_eq!(resp.description, "");
+    }
+
+    #[test]
+    fn test_lnurl_prefix() {
+        let inp = "lightning:LNURL1DP68GURN8GHJ7MR9VAJKUEPWD3HXY6T5WVHXXMMD9AKXUATJD3CZ7CTSDYHHVVF0D3H82UNV9UUNGWPCMUCDQF";
+        let resp = InputEval::evaluate(inp, "", "").unwrap();
+        if let InputNetwork::Lightning(invoice) = resp.network {
+            assert_eq!(*"lnbc", invoice.to_string()[..4]);
+        } else {
+            panic!("not recognized as lightning invoice");
+        }
+        assert_eq!(resp.satoshis, Some(2100));
+        assert_eq!(resp.description, "");
+    }
+
+    #[test]
+    fn test_lightning_address_ben() {
+        let inp = "ben@opreturnbot.com";
+        let resp = InputEval::evaluate(inp, "", "").unwrap();
+        if let InputNetwork::Lightning(invoice) = resp.network {
+            assert_eq!(*"lnbc", invoice.to_string()[..4]);
+        } else {
+            panic!("not recognized as lightning invoice");
+        }
+        assert_eq!(resp.satoshis, Some(1));
+        assert_eq!(resp.description, "");
+    }
+
+    // I didn't want to dox my real card id, as otherwise anybody could block it.
+    #[test]
+    #[should_panic(expected = "HttpResponse(500)")]
+    fn test_lightning_address() {
+        let inp = "2iwc-vo3m-lsks-zt0z@swiss-bitcoin-pay.ch";
+        let resp = InputEval::evaluate(inp, "", "").unwrap();
+        if let InputNetwork::Lightning(invoice) = resp.network {
+            assert_eq!(*"lnbc", invoice.to_string()[..4]);
+        } else {
+            panic!("not recognized as lightning invoice");
+        }
+        assert_eq!(resp.satoshis, None);
+        assert_eq!(resp.description, "");
     }
 }
