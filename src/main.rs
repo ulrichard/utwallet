@@ -46,6 +46,15 @@ struct Greeter {
             log_err_or(BdkWallet::get_balance(), "balance unavailable".to_string()).into()
         }
     ),
+    update_channel: qt_method!(
+        fn update_channel(&mut self) -> QString {
+            log_err_or(
+                BdkWallet::get_channel_status(),
+                "channel balance unavailable".to_string(),
+            )
+            .into()
+        }
+    ),
     send: qt_method!(
         fn send(&mut self, addr: String, amount: String, desc: String) {
             if addr.is_empty() {
@@ -62,6 +71,11 @@ struct Greeter {
             } else {
                 log_err(self.channel_new(&amount));
             }
+        }
+    ),
+    channel_close: qt_method!(
+        fn channel_close(&mut self) {
+            log_err(BdkWallet::channel_close());
         }
     ),
     request: qt_method!(

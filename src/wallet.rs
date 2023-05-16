@@ -21,7 +21,7 @@ use crate::constants::{ESPLORA_SERVERS, LN_ULR};
 use ldk_node::bip39::Mnemonic;
 use ldk_node::bitcoin::{secp256k1::PublicKey, Address, /*Network,*/ Txid};
 use ldk_node::lightning_invoice::Invoice;
-use ldk_node::{Builder, Node};
+use ldk_node::{Builder, Event, Node};
 use rand_core::{OsRng, RngCore};
 use std::{fs, fs::create_dir_all, fs::File, io::Write, path::PathBuf, str::FromStr, sync::Mutex};
 
@@ -50,6 +50,8 @@ impl BdkWallet {
             .send_to_onchain_address(&recipient, amount)
             .map_err(|e| format!("Failed to send on-chain: {:?}", e))?;
 
+        println!("on-chain payment sent: {}", txid);
+
         Ok(txid)
     }
 
@@ -58,10 +60,6 @@ impl BdkWallet {
             .lock()
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
-
-        //if let Err(e) = node.sync_wallets() {
-        //    eprintln!("Failed to sync the wallet: {:?}", e);
-        //}
 
         let id_addr = LN_ULR.split("@").collect::<Vec<_>>();
         assert_eq!(id_addr.len(), 2);
@@ -73,15 +71,26 @@ impl BdkWallet {
         Ok(())
     }
 
-    pub fn create_invoice(amount: Option<u64>, desc: &str) -> Result<String, String> {
+    pub fn channel_close() -> Result<(), String> {
         let node_m = UTNODE
             .lock()
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
 
-        //if let Err(e) = node.sync_wallets() {
-        //    eprintln!("Failed to sync the wallet: {:?}", e);
-        //}
+        let channels = node.list_channels();
+        for c in channels {
+            node.close_channel(&c.channel_id, &c.counterparty.node_id)
+                .map_err(|e| format!("Failed to close a channel: {:?}", e))?;
+        }
+
+        Ok(())
+    }
+
+    pub fn create_invoice(amount: Option<u64>, desc: &str) -> Result<String, String> {
+        let node_m = UTNODE
+            .lock()
+            .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
+        let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
 
         let expiry_secs = 60 * 15;
         let invoice = if let Some(amount) = amount {
@@ -122,7 +131,24 @@ impl BdkWallet {
             (None, None) => Err("No amount to pay the invoice!".to_string()),
         }?;
 
-        Ok(format!("{:?}", ph))
+        let ph = format!("{:?}", ph);
+        println!("lightning payment sent: {}", ph);
+
+        Self::handle_ldk_event(&node)?;
+
+        Ok(ph)
+    }
+
+    fn handle_ldk_event(node: &Node) -> Result<(), String> {
+        let event = node.next_event();
+
+        //match event {
+        //    Event::PaymentSuccessful => println!("payment "),
+        //}
+        println!("ldk event: {:?}", event);
+
+        node.event_handled();
+        Ok(())
     }
 
     pub fn get_address() -> Result<Address, String> {
@@ -130,10 +156,6 @@ impl BdkWallet {
             .lock()
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
-
-        // if let Err(e) = node.sync_wallets() {
-        //    eprintln!("Failed to sync the wallet: {:?}", e);
-        //}
 
         node.new_funding_address()
             .map_err(|e| format!("Unable to get an address: {:?}", e))
@@ -145,20 +167,51 @@ impl BdkWallet {
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
 
-        if let Err(e) = node.sync_wallets() {
-            eprintln!("Failed to sync the wallet: {:?}", e);
-        }
-
         let bal = node
             .onchain_balance()
             .map_err(|e| format!("Unable to get on-chain balance: {:?}", e))?;
 
-        println!("{:?}", bal);
+        println!("on-chain balance: {:?}", bal);
+
+        let channels = node.list_channels();
+        println!("channels: {:?}", channels);
+        let lnbal = channels
+            .iter()
+            .fold(0, |sum, c| sum + c.outbound_capacity_msat)
+            / 1_000;
+
+        for c in channels {
+            let mut config = c.config.unwrap().clone();
+            config.max_dust_htlc_exposure_msat = 20_000_000;
+            node.update_channel(&c.counterparty.node_id, &[c.channel_id], &config)
+                .map_err(|e| format!("Unable to update channel config: {:?}", e))?;
+        }
+
         Ok(format!(
-            "Balance: {} (+{}) BTC",
+            "Balance: {} (+{}) + {} BTC",
             bal.confirmed as f32 / 100_000_000.0,
-            (bal.immature + bal.trusted_pending + bal.untrusted_pending) as f32 / 100_000_000.0
+            (bal.immature + bal.trusted_pending + bal.untrusted_pending) as f32 / 100_000_000.0,
+            lnbal as f32 / 100_000_000.0
         ))
+    }
+
+    pub fn get_channel_status() -> Result<String, String> {
+        let node_m = UTNODE
+            .lock()
+            .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
+        let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
+        let mut channels = node.list_channels();
+        if let Some(channel) = channels.pop() {
+            let mut our_share = channel.outbound_capacity_msat as f32
+                / (channel.outbound_capacity_msat as f32 + channel.inbound_capacity_msat as f32);
+            if !channel.is_usable {
+                our_share = -our_share;
+            }
+            println!("channel status: {}", our_share);
+            Ok(format!("{}", our_share))
+        } else {
+            Ok("".to_string())
+        }
     }
 
     fn create_node() -> Result<Node, String> {

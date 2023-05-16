@@ -42,4 +42,4 @@ init:
 
 setup:
 	sudo apt install docker.io adb git python3 python3-pip mesa-utils libgl1-mesa-glx
-	pip3 install --user --upgrade clickable-ut
+	pip3 install --user --break-system-packages --upgrade clickable-ut

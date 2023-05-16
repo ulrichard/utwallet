@@ -54,7 +54,11 @@ Page {
         Button {
             text: i18n.tr('Scan')
             onClicked: {
+                main_timer.stop();
+
                 mainPage.scanCode();
+
+                main_timer.start();
             }
         }
 
@@ -97,7 +101,11 @@ Page {
         Button {
             text: i18n.tr('Send')
             onClicked: {
+                main_timer.stop();
+
                 greeter.send(send_address.text, send_amount.text, desc_txt.text);
+
+                main_timer.start();
             }
         }
 
@@ -113,13 +121,6 @@ Page {
         }
 
         Button {
-            text: i18n.tr('Channel Open')
-            onClicked: {
-                greeter.channel_open(send_amount.text);
-            }
-        }
-
-        Button {
             text: i18n.tr('Create Invoice')
             onClicked: {
                 main_timer.stop();
@@ -131,6 +132,11 @@ Page {
                 main_timer.start();
             }
         }
+
+	ProgressBar {
+	    id: channel1
+	    value: 0.5
+	}
 
         Label {
             id: label_receive
@@ -166,6 +172,26 @@ Page {
 
         }
         
+        Button {
+            id: btn_channel_open;
+            text: i18n.tr('Channel Open')
+            onClicked: {
+                main_timer.stop();
+                greeter.channel_open(send_amount.text);
+                main_timer.start();
+            }
+        }
+
+        Button {
+            id: btn_channel_close;
+            text: i18n.tr('Channel Close')
+            onClicked: {
+                main_timer.stop();
+                greeter.channel_close();
+                main_timer.start();
+            }
+        }
+
         Timer {
             id: main_timer;
             interval: 2000;
@@ -176,9 +202,25 @@ Page {
                 main_timer.stop();
                 
                 header.title = greeter.update_balance();
-                
                 receive_qr_code.source = greeter.address_qr();
                 label_receive_addr.text = greeter.receiving_address;
+
+                var chan = greeter.update_channel();
+                if (chan == "") {
+                    channel1.visible = false;
+                    btn_channel_open.enabled = true;
+                } else {
+                    channel1.visible = true;
+                    btn_channel_open.enabled = false;
+                    channel1.value = Math.abs(parseFloat(chan));
+                    if (chan.startsWith("-")) {
+                    	// channel1.color = "red";
+                    } else {
+                    	// channel1.color = "green";
+                    }
+
+
+                }
 
                 main_timer.interval = 20000;
                 main_timer.start();
