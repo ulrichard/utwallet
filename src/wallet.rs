@@ -21,7 +21,7 @@ use crate::constants::{ESPLORA_SERVERS, LN_ULR};
 use ldk_node::bip39::Mnemonic;
 use ldk_node::bitcoin::{secp256k1::PublicKey, Address, /*Network,*/ Txid};
 use ldk_node::lightning_invoice::Invoice;
-use ldk_node::{Builder, Event, Node};
+use ldk_node::{Builder, /*Event,*/ Node};
 use rand_core::{OsRng, RngCore};
 use std::{fs, fs::create_dir_all, fs::File, io::Write, path::PathBuf, str::FromStr, sync::Mutex};
 
@@ -229,20 +229,6 @@ impl BdkWallet {
                     mnemonic_file, e
                 )
             })?
-        /*
-                } else if wallet_file.exists() {
-                    // older versions stored a pair of descriptors
-                    let json = fs::read_to_string(&wallet_file)
-                        .map_err(|e| format!("Failed to read the wallet file {:?}: {}", wallet_file, e))?;
-                    serde_json::from_str(&json).unwrap()
-                    let desc: (String, String) = json;
-                    let rgx_descriptor_wpkh_xprv = r#"^wpkh\((xprv[a-zA-Z0-9]+)/[0-9]+/\*\)$"#;
-                    let re = Regex::new(rgx_descriptor_wpkh_xprv).unwrap();
-                    let capt = re.captures(&desc.0).unwrap();
-                    let xpriv = capt.get(1).unwrap().as_str();
-                    let xpriv = ExtendedPrivKey::from_str(xpriv).unwrap();
-                    // there seems to be no way to get from an ExtendedPrivKey to a mnemonic
-        */
         } else {
             // Generate fresh mnemonic
             let mut entropy = [0u8; 16];
@@ -279,75 +265,215 @@ impl BdkWallet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ldk_node::bitcoin::{secp256k1::PublicKey, util::bip32::ExtendedPrivKey, Network};
-    use regex::Regex;
-    use std::str::FromStr;
+    use electrsd::{
+        bitcoind::{self, bitcoincore_rpc::RpcApi, BitcoinD},
+        electrum_client::ElectrumApi,
+        ElectrsD,
+    };
+    use std::{
+        net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener},
+        thread::sleep,
+        time::Duration,
+    };
 
-    #[test]
-    fn test_descriptor_to_mnemonic() {
-        let mnemonic = Mnemonic::parse("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about").unwrap();
-        let seed_bytes = mnemonic.to_seed("");
-        let xprv = ExtendedPrivKey::new_master(Network::Bitcoin, &seed_bytes).unwrap();
-        let desc = format!("wpkh({}/0/*)", xprv);
-        assert_eq!(desc, "wpkh(xprv9s21ZrQH143K3GJpoapnV8SFfukcVBSfeCficPSGfubmSFDxo1kuHnLisriDvSnRRuL2Qrg5ggqHKNVpxR86QEC8w35uxmGoggxtQTPvfUu/0/*)");
-        let rgx_descriptor_wpkh_xprv = r#"^wpkh\((xprv[a-zA-Z0-9]+)/[0-9]+/\*\)$"#;
-        let re = Regex::new(rgx_descriptor_wpkh_xprv).unwrap();
-        assert!(re.is_match(&desc));
-        let capt = re.captures(&desc).unwrap();
-        assert_eq!(capt.len(), 2);
-        let xpriv = capt.get(1).unwrap().as_str();
-        assert_eq!(xpriv, "xprv9s21ZrQH143K3GJpoapnV8SFfukcVBSfeCficPSGfubmSFDxo1kuHnLisriDvSnRRuL2Qrg5ggqHKNVpxR86QEC8w35uxmGoggxtQTPvfUu");
-        let xpriv = ExtendedPrivKey::from_str(xpriv).unwrap();
-        assert_eq!(xprv, xpriv);
+    struct RegTestEnv {
+        /// Instance of the bitcoin core daemon
+        bitcoind: BitcoinD,
+        /// Instance of the electrs electrum server
+        electrsd: ElectrsD,
+        /// ldk-node instances
+        ldk_nodes: Vec<Node>,
+    }
+
+    impl RegTestEnv {
+        /// set up local bitcoind and electrs instances in regtest mode, and connect a number of ldk-nodes to it.
+        pub fn new(num_nodes: u8) -> Self {
+            let bitcoind_exe =
+                bitcoind::downloaded_exe_path().expect("bitcoind version feature must be enabled");
+            let mut btc_conf = bitcoind::Conf::default();
+            btc_conf.network = "regtest";
+            let bitcoind = BitcoinD::with_conf(bitcoind_exe, &btc_conf).unwrap();
+            let electrs_exe =
+                electrsd::downloaded_exe_path().expect("electrs version feature must be enabled");
+            let mut elect_conf = electrsd::Conf::default();
+            elect_conf.http_enabled = true;
+            elect_conf.network = "regtest";
+            let electrsd = ElectrsD::with_conf(electrs_exe, &bitcoind, &elect_conf).unwrap();
+
+            // start the ldk-nodes
+            let ldk_nodes = (0..num_nodes)
+                .map(|i| {
+                    let listen = SocketAddr::new(
+                        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                        Self::get_available_port(),
+                    );
+                    let node = Builder::new()
+                        .set_network("regtest")
+                        .set_esplora_server_url(electrsd.esplora_url.clone().unwrap())
+                        .set_listening_address(listen)
+                        .build();
+                    node.start().unwrap();
+                    println!("node {:?} starting at {:?}", i, listen);
+                    node
+                })
+                .collect::<Vec<_>>();
+
+            RegTestEnv {
+                bitcoind,
+                electrsd,
+                ldk_nodes,
+            }
+        }
+
+        /// fund on-chain wallets
+        pub fn fund_on_chain_wallets(&self, num_blocks: &[usize], retries: u8) {
+            // generate coins to the node addresses
+            num_blocks
+                .iter()
+                .zip(self.ldk_nodes.iter())
+                .for_each(|(num_blocks, node)| {
+                    let addr = node.new_funding_address().unwrap();
+                    println!("Generating {} blocks to {}", num_blocks, addr);
+                    self.generate_to_address(*num_blocks, &addr);
+                });
+
+            // generate another 100 blocks to make the funds available
+            let addr = self
+                .ldk_nodes
+                .last()
+                .unwrap()
+                .new_funding_address()
+                .unwrap();
+            println!("Generating {} blocks to {}", 100, addr);
+            self.generate_to_address(100, &addr);
+
+            num_blocks
+                .iter()
+                .zip(self.ldk_nodes.iter())
+                .enumerate()
+                .for_each(|(i, (num_blocks, node))| {
+                    // synchronizing the nodes
+                    let _success = (0..retries)
+                        .map(|i| (i, node.sync_wallets()))
+                        .find(|(i, r)| {
+                            if let Err(e) = r {
+                                println!("{:?} : {:?}", i, e);
+                                sleep(Duration::from_secs(1));
+                            }
+                            r.is_ok()
+                        });
+                    //assert!(success.is_some());
+
+                    // checking the on-chain balance of the nodes
+                    (0..5).find(|_| {
+                        let bal = node.onchain_balance().unwrap().confirmed;
+                        if bal == 0 {
+                            sleep(Duration::from_secs(1));
+                        }
+                        bal > 0
+                    });
+                    let bal = node.onchain_balance().unwrap();
+                    println!("{:?}", bal);
+                    let expected = *num_blocks as u64 * 5_000_000_000;
+                    assert_eq!(
+                        bal.confirmed, expected,
+                        "node {} has a confirmed balance of {}",
+                        i, bal
+                    );
+                });
+            assert_eq!(self.get_height(), num_blocks.iter().sum::<usize>() + 100);
+        }
+
+        /// open channels
+        pub fn open_channels(&self, channels: &[(usize, usize, u64)]) {
+            channels.iter().for_each(|(n1, n2, sats)| {
+                let n1 = &self.ldk_nodes[*n1];
+                let n2 = &self.ldk_nodes[*n2];
+                n1.connect_open_channel(
+                    n2.node_id(),
+                    n2.listening_address().unwrap().clone(),
+                    sats * 1_000,
+                    None,
+                    true,
+                )
+                .unwrap();
+
+                //sleep(Duration::from_secs(1));
+                //let event = node.next_event();
+                //println!("ldk event: {:?}", event);
+                //node.event_handled();
+
+                self.generate_to_address(3, &n1.new_funding_address().unwrap());
+                let channels = n1.list_channels();
+                let chan = channels.last().unwrap();
+                println!("new channel: {:?}", chan);
+            });
+        }
+
+        fn get_height(&self) -> usize {
+            self.electrsd
+                .client
+                .block_headers_subscribe()
+                .unwrap()
+                .height
+        }
+
+        pub fn generate_to_address(&self, blocks: usize, address: &Address) {
+            let old_height = self.get_height();
+
+            self.bitcoind
+                .client
+                .generate_to_address(blocks as u64, address)
+                .unwrap();
+
+            let new_height = loop {
+                sleep(Duration::from_secs(1));
+                let new_height = self.get_height();
+                if new_height >= old_height + blocks {
+                    break new_height;
+                }
+            };
+
+            assert_eq!(new_height, old_height + blocks);
+        }
+
+        /// Returns a non-used local port if available.
+        /// Note there is a race condition during the time the method check availability and the caller
+        fn get_available_port() -> u16 {
+            // using 0 as port let the system assign a port available
+            let t = TcpListener::bind(("127.0.0.1", 0)).unwrap(); // 0 means the OS choose a free port
+            t.local_addr().map(|s| s.port()).unwrap()
+        }
     }
 
     #[test]
-    fn test_init_node() {
-        let mnemonic = Mnemonic::parse("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about").unwrap();
-        let node = Builder::new()
-            .set_network("bitcoin")
-            .set_esplora_server_url(crate::constants::ESPLORA_SERVERS[0].to_string())
-            .set_entropy_bip39_mnemonic(mnemonic, Some("TREZOR".to_string()))
-            .build();
-        node.start().unwrap();
+    /// Open only one channel between two nodes
+    ///      0 --------> 1
+    fn test_regtest_two_nodes() {
+        let regtest_env = RegTestEnv::new(2);
+        regtest_env.fund_on_chain_wallets(&[1, 1], 5);
+        regtest_env.open_channels(&[(0, 1, 1_000_000)]);
+    }
 
-        assert_eq!(format!("{:?}", node.node_id()), "PublicKey(9720ef321576ad8d8709809f4a3a44c217fcef447475f712c3b02c0a2a1b4d4936f030becdc20dd920e1bfa4647fbefd7919bd6ea04ecb82e8eb8d926dd294a0)");
-        assert_eq!(
-            format!("{:?}", node.new_funding_address()),
-            "Ok(bc1qv5rmq0kt9yz3pm36wvzct7p3x6mtgehjul0feu)"
-        );
-        assert_eq!(
-            format!("{:?}", node.onchain_balance()),
-            "Ok(Balance { immature: 0, trusted_pending: 0, untrusted_pending: 0, confirmed: 0 })"
-        );
-        assert_eq!(format!("{:?}", node.list_channels()), "[]");
-        assert_eq!(
-            format!("{:?}", node.listening_address()),
-            "Some(0.0.0.0:9735)"
-        );
-
-        // .. fund address ..
-
-        if let Err(e) = node.sync_wallets() {
-            eprintln!("Failed to sync the node: {}", e);
-        }
-
-        let invoice = node
-            .receive_variable_amount_payment("test", 60 * 30)
-            .unwrap();
-        assert_eq!(invoice.amount_milli_satoshis(), None);
-
-        let id_addr = crate::constants::LN_ULR.split("@").collect::<Vec<_>>();
-        assert_eq!(id_addr.len(), 2);
-        let node_id = PublicKey::from_str(id_addr[0]).unwrap();
-        let node_addr = id_addr[1].parse().unwrap();
-        node.connect(node_id, node_addr, false).unwrap();
-        // node.connect_open_channel(node_id, node_addr, 10000, None, false)
-        //    .unwrap();
-
-        // let invoice = Invoice::from_str("INVOICE_STR").unwrap();
-        // node.send_payment(&invoice).unwrap();
-
-        node.stop().unwrap();
+    #[test]
+    /// Open channels for the following graph:
+    ///      0 --------> 1
+    ///        \         / \
+    ///         \       /    >  4 ---> 5
+    ///          \     /      >
+    ///           \   <       /
+    ///            > 2 ---> 3
+    fn test_regtest_six_nodes() {
+        let regtest_env = RegTestEnv::new(6);
+        regtest_env.fund_on_chain_wallets(&[2, 2, 2, 2, 2, 2], 5);
+        regtest_env.open_channels(&[
+            (0, 1, 1_000_000_000),
+            (0, 2, 1_000_000_000),
+            (1, 2, 9_000_000_000),
+            (2, 3, 9_000_000_000),
+            (1, 4, 1_000_000_000),
+            (3, 4, 1_000_000_000),
+            (4, 5, 2_000_000_000),
+        ]);
     }
 }

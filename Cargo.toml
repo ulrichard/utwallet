@@ -23,3 +23,7 @@ lnurl-rs = "0.2"
 [build-dependencies]
 cpp_build = "0.5"
 cmake = "0.1"
+
+[dev-dependencies]
+electrsd = { version= "0.23", features = ["bitcoind_23_0", "esplora_a33e97e1", "legacy"] }
+
