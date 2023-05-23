@@ -218,9 +218,9 @@ Page {
                     } else {
                     	// channel1.color = "green";
                     }
-
-
                 }
+
+                var event_desc = greeter.ldk_events();
 
                 main_timer.interval = 20000;
                 main_timer.start();

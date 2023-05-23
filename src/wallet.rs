@@ -21,13 +21,21 @@ use crate::constants::{ESPLORA_SERVERS, LN_ULR};
 use ldk_node::bip39::Mnemonic;
 use ldk_node::bitcoin::{secp256k1::PublicKey, Address, /*Network,*/ Txid};
 use ldk_node::lightning_invoice::Invoice;
-use ldk_node::{Builder, Event, Node};
+use ldk_node::{Builder, /*Event,*/ Node};
 use rand_core::{OsRng, RngCore};
-use std::{fs, fs::create_dir_all, fs::File, io::Write, path::PathBuf, str::FromStr, sync::Mutex};
+use std::{
+    fs,
+    fs::create_dir_all,
+    fs::File,
+    io::Write,
+    path::PathBuf,
+    str::FromStr,
+    sync::{Arc, Mutex},
+};
 
 pub struct BdkWallet {}
 
-static UTNODE: Mutex<Option<Node>> = Mutex::new(None);
+static UTNODE: Mutex<Option<Arc<Node>>> = Mutex::new(None);
 
 /// A facade for bdk::Wallet with a singleton instance
 impl BdkWallet {
@@ -79,7 +87,7 @@ impl BdkWallet {
 
         let channels = node.list_channels();
         for c in channels {
-            node.close_channel(&c.channel_id, &c.counterparty.node_id)
+            node.close_channel(&c.channel_id, c.counterparty_node_id)
                 .map_err(|e| format!("Failed to close a channel: {:?}", e))?;
         }
 
@@ -134,21 +142,28 @@ impl BdkWallet {
         let ph = format!("{:?}", ph);
         println!("lightning payment sent: {}", ph);
 
-        Self::handle_ldk_event(&node)?;
-
         Ok(ph)
     }
 
-    fn handle_ldk_event(node: &Node) -> Result<(), String> {
-        let event = node.next_event();
+    pub fn handle_ldk_event() -> Result<String, String> {
+        let node_m = UTNODE
+            .lock()
+            .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
+        let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
 
-        //match event {
-        //    Event::PaymentSuccessful => println!("payment "),
-        //}
-        println!("ldk event: {:?}", event);
+        if let Some(event) = node.next_event() {
+            //match event {
+            //    Event::PaymentSuccessful => println!("payment "),
+            //}
+            let descr = format!("{:?}", event);
+            println!("ldk event: {}", descr);
 
-        node.event_handled();
-        Ok(())
+            node.event_handled();
+
+            Ok(descr)
+        } else {
+            Ok("".to_string())
+        }
     }
 
     pub fn get_address() -> Result<Address, String> {
@@ -180,12 +195,16 @@ impl BdkWallet {
             .fold(0, |sum, c| sum + c.outbound_capacity_msat)
             / 1_000;
 
+        /*
         for c in channels {
             let mut config = c.config.unwrap().clone();
-            config.max_dust_htlc_exposure_msat = 20_000_000;
-            node.update_channel(&c.counterparty.node_id, &[c.channel_id], &config)
+            config.max_dust_htlc_exposure_msat = 27_000_000;
+            config.forwarding_fee_base_msat = 0;
+            // config.forwarding_fee_proportional_millionths = 0;
+            node.update_channel(&c.counterparty_node_id, &[c.channel_id], &config)
                 .map_err(|e| format!("Unable to update channel config: {:?}", e))?;
         }
+        */
 
         Ok(format!(
             "Balance: {} (+{}) + {} BTC",
@@ -200,6 +219,15 @@ impl BdkWallet {
             .lock()
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
+
+        /*
+        let id_addr = crate::constants::LN_ULR.split("@").collect::<Vec<_>>();
+        assert_eq!(id_addr.len(), 2);
+        let node_id = PublicKey::from_str(id_addr[0]).unwrap();
+        let node_addr = id_addr[1].parse().unwrap();
+        node.connect(node_id, node_addr, true).unwrap();
+        */
+
         let mut channels = node.list_channels();
         if let Some(channel) = channels.pop() {
             let mut our_share = channel.outbound_capacity_msat as f32
@@ -214,7 +242,7 @@ impl BdkWallet {
         }
     }
 
-    fn create_node() -> Result<Node, String> {
+    fn create_node() -> Result<Arc<Node>, String> {
         //let network = Network::Bitcoin;
         let app_data_path =
             unsafe { QStandardPaths::writable_location(StandardLocation::AppDataLocation) };
@@ -266,11 +294,22 @@ impl BdkWallet {
 
         let node = Builder::new()
             .set_network("bitcoin")
-            .set_esplora_server_url(ESPLORA_SERVERS[0].to_string())
+            .set_esplora_server_url(ESPLORA_SERVERS[1].to_string())
             .set_entropy_bip39_mnemonic(mnemonic, None)
             .set_storage_dir_path(ldk_dir.to_str().unwrap().to_string())
+            .set_gossip_source_rgs("https://rapidsync.lightningdevkit.org/snapshot".to_string())
             .build();
         node.start().unwrap();
+
+        /*
+        let id_addr = crate::constants::LN_ULR.split("@").collect::<Vec<_>>();
+        assert_eq!(id_addr.len(), 2);
+        let node_id = PublicKey::from_str(id_addr[0]).unwrap();
+        let node_addr = id_addr[1].parse().unwrap();
+        if let Err(e) = node.connect(node_id, node_addr, true) {
+            eprintln!("{}", e);
+        }
+        */
 
         Ok(node)
     }

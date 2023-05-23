@@ -55,6 +55,11 @@ struct Greeter {
             .into()
         }
     ),
+    ldk_events: qt_method!(
+        fn ldk_events(&mut self) -> QString {
+            log_err_or(BdkWallet::handle_ldk_event(), "".to_string()).into()
+        }
+    ),
     send: qt_method!(
         fn send(&mut self, addr: String, amount: String, desc: String) {
             if addr.is_empty() {
