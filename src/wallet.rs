@@ -20,6 +20,7 @@ use crate::constants::{ESPLORA_SERVERS, LN_ULR};
 
 use ldk_node::bip39::Mnemonic;
 use ldk_node::bitcoin::{secp256k1::PublicKey, Address, /*Network,*/ Txid};
+use ldk_node::io::FilesystemStore;
 use ldk_node::lightning_invoice::Invoice;
 use ldk_node::{Builder, /*Event,*/ Node};
 use rand_core::{OsRng, RngCore};
@@ -35,7 +36,7 @@ use std::{
 
 pub struct BdkWallet {}
 
-static UTNODE: Mutex<Option<Arc<Node>>> = Mutex::new(None);
+static UTNODE: Mutex<Option<Arc<Node<FilesystemStore>>>> = Mutex::new(None);
 
 /// A facade for bdk::Wallet with a singleton instance
 impl BdkWallet {
@@ -242,7 +243,7 @@ impl BdkWallet {
         }
     }
 
-    fn create_node() -> Result<Arc<Node>, String> {
+    fn create_node() -> Result<Arc<Node<FilesystemStore>>, String> {
         //let network = Network::Bitcoin;
         let app_data_path =
             unsafe { QStandardPaths::writable_location(StandardLocation::AppDataLocation) };
@@ -321,7 +322,7 @@ mod tests {
         /// Instance of the electrs electrum server
         electrsd: ElectrsD,
         /// ldk-node instances
-        ldk_nodes: Vec<Node>,
+        ldk_nodes: Vec<Node<FilesystemStore>>,
     }
 
     impl RegTestEnv {

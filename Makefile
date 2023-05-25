@@ -1,7 +1,7 @@
 # https://ubports.com/de/blog/ubports-blogs-nachrichten-1/post/introduction-to-clickable-147
 # https://docs.ubports.com/en/latest/appdev/platform/apparmor.html
 # In desktop mode /home/phablet is mounted to ~/.clickable/home/. You can manipulate and add data there.
-# If the logs target doesn't show the logs, check the following file on the device:  ~/.cache/upstart/application-click-utwallet.ulrichard_utwallet_0.0.2.log
+# If the logs target doesn't show the logs, check the following file on the device:  ~/.cache/upstart/application-click-utlnwallet.ulrichard_utlnwallet_0.0.2.log
 
 gui:
 	export all_proxy=""

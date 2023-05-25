@@ -1,6 +1,6 @@
 [Desktop Entry]
-Name=utwallet
-Exec=utwallet %U
+Name=utlnwallet
+Exec=utlnwallet %U
 Icon=assets/logo.svg
 Terminal=false
 Type=Application

@@ -53,6 +53,7 @@ Page {
 
         Button {
             text: i18n.tr('Scan')
+            visible: false
             onClicked: {
                 main_timer.stop();
 
@@ -104,7 +105,9 @@ Page {
                 main_timer.stop();
 
                 greeter.send(send_address.text, send_amount.text, desc_txt.text);
+                send_address.text = "";
 
+                main_timer.interval = 1000;
                 main_timer.start();
             }
         }
@@ -125,10 +128,12 @@ Page {
             onClicked: {
                 main_timer.stop();
 
+                receive_qr_code.visible = false
                 receive_qr_code.source = greeter.request(send_amount.text, desc_txt.text);
+                receive_qr_code.visible = true;
                 label_receive_addr.text = greeter.receiving_address;
 
-                main_timer.interval = 60000;
+                main_timer.interval = 10000;
                 main_timer.start();
             }
         }

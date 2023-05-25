@@ -5,7 +5,7 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; version 3.
  *
- * utwallet is distributed in the hope that it will be useful,
+ * utlnwallet is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
@@ -28,7 +28,7 @@ ApplicationWindow {
     height: units.gu(95)
     minimumWidth: 360
     minimumHeight: 640
-    title: i18n.tr("utwallet")
+    title: i18n.tr("utlnwallet")
     visible: true
 
     Shortcut {

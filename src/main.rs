@@ -5,7 +5,7 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; version 3.
  *
- * utwallet is distributed in the hope that it will be useful,
+ * utlnwallet is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
@@ -30,7 +30,6 @@ mod wallet;
 use crate::input_eval::{parse_satoshis, InputEval, InputNetwork};
 use crate::wallet::BdkWallet;
 
-//use ldk_node::bitcoin::Address;
 use qrcode_png::{Color, QrCode, QrCodeEcc};
 use std::{env, fs::create_dir_all, path::PathBuf /*, str::FromStr*/};
 
@@ -222,7 +221,7 @@ fn main() {
             #include <QtCore/QString>
         }}
         cpp! {[]{
-            QCoreApplication::setApplicationName(QStringLiteral("utwallet.ulrichard"));
+            QCoreApplication::setApplicationName(QStringLiteral("utlnwallet.ulrichard"));
         }}
     }
     QQuickStyle::set_style("Suru");
@@ -233,14 +232,14 @@ fn main() {
     println!("Initializing the node singleton.");
     log_err(BdkWallet::init_node());
 
-    println!("Loading file /qml/utwallet.qml.");
-    engine.load_file("qrc:/qml/utwallet.qml".into());
+    println!("Loading file /qml/utlnwallet.qml.");
+    engine.load_file("qrc:/qml/utlnwallet.qml".into());
     println!("Entering the QML main loop.");
     engine.exec();
 }
 
 fn init_gettext() {
-    let domain = "utwallet.ulrichard";
+    let domain = "utlnwallet.ulrichard";
     textdomain(domain).expect("Failed to set gettext domain");
 
     let app_dir = env::var("APP_DIR").expect("Failed to read the APP_DIR environment variable");

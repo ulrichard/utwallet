@@ -1,9 +1,9 @@
 clickable_minimum_required: 7.1.2
 builder: rust
 framework: ubuntu-sdk-20.04
-kill: utwallet
+kill: utlnwallet
 install_root_data:
 - manifest.json
-- utwallet.apparmor
-- utwallet.desktop
+- utlnwallet.apparmor
+- utlnwallet.desktop
 - assets

@@ -1,15 +1,15 @@
 {
-    "name": "utwallet.ulrichard",
-    "description": "Bitcoin Wallet",
+    "name": "utlnwallet.ulrichard",
+    "description": "Bitcoin Lightning Wallet",
     "architecture": "@CLICK_ARCH@",
-    "title": "utwallet",
+    "title": "utlnwallet",
     "hooks": {
-        "utwallet": {
-            "apparmor": "utwallet.apparmor",
-            "desktop":  "utwallet.desktop"
+        "utlnwallet": {
+            "apparmor": "utlnwallet.apparmor",
+            "desktop":  "utlnwallet.desktop"
         }
     },
     "version": "0.0.5",
-    "maintainer": "Richard Ulrich <richi+utwallet@ulrichard.ch>",
+    "maintainer": "Richard Ulrich <richi+utlnwallet@ulrichard.ch>",
     "framework" : "@CLICK_FRAMEWORK@"
 }
