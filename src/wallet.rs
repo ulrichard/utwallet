@@ -19,7 +19,7 @@ use qt_core::{q_standard_paths::StandardLocation, QStandardPaths};
 use crate::constants::{ESPLORA_SERVERS, LN_ULR};
 
 use ldk_node::bip39::Mnemonic;
-use ldk_node::bitcoin::{secp256k1::PublicKey, Address, /*Network,*/ Txid};
+use ldk_node::bitcoin::{secp256k1::PublicKey, Address, Network, Txid};
 use ldk_node::io::FilesystemStore;
 use ldk_node::lightning_invoice::Invoice;
 use ldk_node::{Builder, /*Event,*/ Node};
@@ -279,24 +279,14 @@ impl BdkWallet {
         write!(output, "{}", mnemonic_words)
             .map_err(|e| format!("Failed to write mnemonic file: {}", e))?;
 
-        let node = Builder::new()
-            .set_network("bitcoin")
-            .set_esplora_server_url(ESPLORA_SERVERS[1].to_string())
-            .set_entropy_bip39_mnemonic(mnemonic, None)
-            .set_storage_dir_path(ldk_dir.to_str().unwrap().to_string())
-            .set_gossip_source_rgs("https://rapidsync.lightningdevkit.org/snapshot".to_string())
-            .build();
+        let mut builder = Builder::new();
+        builder.set_network(Network::Bitcoin);
+        builder.set_esplora_server(ESPLORA_SERVERS[1].to_string());
+        builder.set_entropy_bip39_mnemonic(mnemonic, None);
+        builder.set_storage_dir_path(ldk_dir.to_str().unwrap().to_string());
+        builder.set_gossip_source_rgs("https://rapidsync.lightningdevkit.org/snapshot".to_string());
+        let node = builder.build();
         node.start().unwrap();
-
-        /*
-        let id_addr = crate::constants::LN_ULR.split("@").collect::<Vec<_>>();
-        assert_eq!(id_addr.len(), 2);
-        let node_id = PublicKey::from_str(id_addr[0]).unwrap();
-        let node_addr = id_addr[1].parse().unwrap();
-        if let Err(e) = node.connect(node_id, node_addr, true) {
-            eprintln!("{}", e);
-        }
-        */
 
         Ok(node)
     }
