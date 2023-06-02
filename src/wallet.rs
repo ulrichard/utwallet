@@ -279,7 +279,7 @@ impl BdkWallet {
         write!(output, "{}", mnemonic_words)
             .map_err(|e| format!("Failed to write mnemonic file: {}", e))?;
 
-        let mut builder = Builder::new();
+        let builder = Builder::new();
         builder.set_network(Network::Bitcoin);
         builder.set_esplora_server(ESPLORA_SERVERS[1].to_string());
         builder.set_entropy_bip39_mnemonic(mnemonic, None);
@@ -312,7 +312,7 @@ mod tests {
         /// Instance of the electrs electrum server
         electrsd: ElectrsD,
         /// ldk-node instances
-        ldk_nodes: Vec<Node<FilesystemStore>>,
+        ldk_nodes: Vec<Arc<Node<FilesystemStore>>>,
     }
 
     impl RegTestEnv {
@@ -337,11 +337,10 @@ mod tests {
                         IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                         Self::get_available_port(),
                     );
-                    let node = Builder::new()
-                        .set_network("regtest")
-                        .set_esplora_server_url(electrsd.esplora_url.clone().unwrap())
-                        .set_listening_address(listen)
-                        .build();
+                    let builder = Builder::new();
+                    builder.set_network(Network::Regtest);
+                    builder.set_esplora_server(electrsd.esplora_url.clone().unwrap());
+                    let node = builder.build();
                     node.start().unwrap();
                     println!("node {:?} starting at {:?}", i, listen);
                     node
