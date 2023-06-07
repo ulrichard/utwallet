@@ -16,11 +16,11 @@
 
 use qt_core::{q_standard_paths::StandardLocation, QStandardPaths};
 
-use crate::constants::{ESPLORA_SERVERS, LN_ULR};
+use crate::constants::{ESPLORA_SERVERS, LN_ULR, RAPID_GOSSIP_SYNC_URL};
 
 use ldk_node::bip39::Mnemonic;
 use ldk_node::bitcoin::{secp256k1::PublicKey, Address, Network, Txid};
-use ldk_node::io::FilesystemStore;
+use ldk_node::io::SqliteStore;
 use ldk_node::lightning_invoice::Invoice;
 use ldk_node::{Builder, /*Event,*/ Node};
 use rand_core::{OsRng, RngCore};
@@ -29,14 +29,14 @@ use std::{
     fs::create_dir_all,
     fs::File,
     io::Write,
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr,
     sync::{Arc, Mutex},
 };
 
 pub struct BdkWallet {}
 
-static UTNODE: Mutex<Option<Arc<Node<FilesystemStore>>>> = Mutex::new(None);
+static UTNODE: Mutex<Option<Arc<Node<SqliteStore>>>> = Mutex::new(None);
 
 /// A facade for bdk::Wallet with a singleton instance
 impl BdkWallet {
@@ -177,17 +177,18 @@ impl BdkWallet {
             .map_err(|e| format!("Unable to get an address: {:?}", e))
     }
 
-    pub fn get_balance() -> Result<String, String> {
+    pub fn get_balance() -> Result<(f32, f32), String> {
         let node_m = UTNODE
             .lock()
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
 
-        let bal = node
+        let ocbal = node
             .onchain_balance()
-            .map_err(|e| format!("Unable to get on-chain balance: {:?}", e))?;
+            .map_err(|e| format!("Unable to get on-chain balance: {:?}", e))?
+            .get_spendable();
 
-        println!("on-chain balance: {:?}", bal);
+        println!("on-chain balance: {}", ocbal);
 
         let channels = node.list_channels();
         println!("channels: {:?}", channels);
@@ -196,23 +197,7 @@ impl BdkWallet {
             .fold(0, |sum, c| sum + c.outbound_capacity_msat)
             / 1_000;
 
-        /*
-        for c in channels {
-            let mut config = c.config.unwrap().clone();
-            config.max_dust_htlc_exposure_msat = 27_000_000;
-            config.forwarding_fee_base_msat = 0;
-            // config.forwarding_fee_proportional_millionths = 0;
-            node.update_channel(&c.counterparty_node_id, &[c.channel_id], &config)
-                .map_err(|e| format!("Unable to update channel config: {:?}", e))?;
-        }
-        */
-
-        Ok(format!(
-            "Balance: {} (+{}) + {} BTC",
-            bal.confirmed as f32 / 100_000_000.0,
-            (bal.immature + bal.trusted_pending + bal.untrusted_pending) as f32 / 100_000_000.0,
-            lnbal as f32 / 100_000_000.0
-        ))
+        Ok((ocbal as f32 / 100_000_000.0, lnbal as f32 / 100_000_000.0))
     }
 
     pub fn get_channel_status() -> Result<String, String> {
@@ -220,14 +205,6 @@ impl BdkWallet {
             .lock()
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
-
-        /*
-        let id_addr = crate::constants::LN_ULR.split("@").collect::<Vec<_>>();
-        assert_eq!(id_addr.len(), 2);
-        let node_id = PublicKey::from_str(id_addr[0]).unwrap();
-        let node_addr = id_addr[1].parse().unwrap();
-        node.connect(node_id, node_addr, true).unwrap();
-        */
 
         let mut channels = node.list_channels();
         if let Some(channel) = channels.pop() {
@@ -243,53 +220,58 @@ impl BdkWallet {
         }
     }
 
-    fn create_node() -> Result<Arc<Node<FilesystemStore>>, String> {
-        //let network = Network::Bitcoin;
+    fn create_node() -> Result<Arc<Node<SqliteStore>>, String> {
         let app_data_path =
             unsafe { QStandardPaths::writable_location(StandardLocation::AppDataLocation) };
         let mnemonic_file = PathBuf::from(app_data_path.to_std_string()).join("mnemonic.txt");
+        let mnemonic = read_or_generate_mnemonic(&mnemonic_file)?;
         let ldk_dir = PathBuf::from(app_data_path.to_std_string()).join("ldk");
-        //let wallet_file = PathBuf::from(app_data_path.to_std_string()).join("wallet.descriptor");
 
-        let mnemonic_words = if mnemonic_file.exists() {
-            fs::read_to_string(&mnemonic_file).map_err(|e| {
-                format!(
-                    "Failed to read the mnemonic file {:?}: {}",
-                    mnemonic_file, e
-                )
-            })?
-        } else {
-            // Generate fresh mnemonic
-            let mut entropy = [0u8; 16];
-            OsRng.fill_bytes(&mut entropy);
-            let mnemonic = Mnemonic::from_entropy(&entropy)
-                .map_err(|e| format!("Failed to generate mnemonic: {:?}", e))?;
-            mnemonic.to_string()
-        };
-
-        let mnemonic = Mnemonic::parse(&mnemonic_words)
-            .map_err(|e| format!("Failed to parse mnemonic: {}", e))?;
-
-        let prefix = mnemonic_file
-            .parent()
-            .ok_or("Failed to get parent path".to_string())?;
-        create_dir_all(prefix).map_err(|e| format!("Failed to create directory: {}", e))?;
-        let mut output = File::create(mnemonic_file)
-            .map_err(|e| format!("Failed to create mnemonic file: {}", e))?;
-        write!(output, "{}", mnemonic_words)
-            .map_err(|e| format!("Failed to write mnemonic file: {}", e))?;
-
-        let mut builder = Builder::new();
+        let builder = Builder::new();
         builder.set_network(Network::Bitcoin);
         builder.set_esplora_server(ESPLORA_SERVERS[1].to_string());
         builder.set_entropy_bip39_mnemonic(mnemonic, None);
         builder.set_storage_dir_path(ldk_dir.to_str().unwrap().to_string());
-        builder.set_gossip_source_rgs("https://rapidsync.lightningdevkit.org/snapshot".to_string());
+        builder.set_gossip_source_rgs(RAPID_GOSSIP_SYNC_URL.to_string());
+
         let node = builder.build();
         node.start().unwrap();
 
         Ok(node)
     }
+}
+
+fn read_or_generate_mnemonic(mnemonic_file: &Path) -> Result<Mnemonic, String> {
+    let mnemonic_words = if mnemonic_file.exists() {
+        fs::read_to_string(&mnemonic_file).map_err(|e| {
+            format!(
+                "Failed to read the mnemonic file {:?}: {}",
+                mnemonic_file, e
+            )
+        })?
+    } else {
+        // Generate fresh mnemonic
+        let mut entropy = [0u8; 16];
+        OsRng.fill_bytes(&mut entropy);
+        let mnemonic = Mnemonic::from_entropy(&entropy)
+            .map_err(|e| format!("Failed to generate mnemonic: {:?}", e))?;
+        mnemonic.to_string()
+    };
+
+    let mnemonic =
+        Mnemonic::parse(&mnemonic_words).map_err(|e| format!("Failed to parse mnemonic: {}", e))?;
+
+    // persist the mnemonic
+    let prefix = mnemonic_file
+        .parent()
+        .ok_or("Failed to get parent path".to_string())?;
+    create_dir_all(prefix).map_err(|e| format!("Failed to create directory: {}", e))?;
+    let mut output = File::create(mnemonic_file)
+        .map_err(|e| format!("Failed to create mnemonic file: {}", e))?;
+    write!(output, "{}", mnemonic_words)
+        .map_err(|e| format!("Failed to write mnemonic file: {}", e))?;
+
+    Ok(mnemonic)
 }
 
 #[cfg(test)]
@@ -312,7 +294,7 @@ mod tests {
         /// Instance of the electrs electrum server
         electrsd: ElectrsD,
         /// ldk-node instances
-        ldk_nodes: Vec<Node<FilesystemStore>>,
+        ldk_nodes: Vec<Node<SqliteStore>>,
     }
 
     impl RegTestEnv {

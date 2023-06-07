@@ -27,9 +27,11 @@ mod input_eval;
 mod qrc;
 mod wallet;
 
+use crate::constants::COINMARKETCAP_API_KEY;
 use crate::input_eval::{parse_satoshis, InputEval, InputNetwork};
 use crate::wallet::BdkWallet;
 
+use cmc::CmcBuilder;
 use qrcode_png::{Color, QrCode, QrCodeEcc};
 use std::{env, fs::create_dir_all, path::PathBuf /*, str::FromStr*/};
 
@@ -39,15 +41,28 @@ use gettextrs::{bindtextdomain, textdomain};
 struct Greeter {
     base: qt_base_class!(trait QObject),
     receiving_address: qt_property!(QString),
+    eventlog: std::collections::VecDeque<String>,
+    exchange_rate: Option<f64>,
 
     update_balance: qt_method!(
         fn update_balance(&mut self) -> QString {
-            log_err_or(BdkWallet::get_balance(), "balance unavailable".to_string()).into()
+            let (ocbal, lnbal) = self.log_err_or(BdkWallet::get_balance(), (0.0, 0.0));
+
+            let mut msg = format!("Balance: {} + {} BTC", ocbal, lnbal);
+            if self.exchange_rate.is_none() {
+                let rate = self.refresh_exchange_rate();
+                self.log_err_or(rate, 0.0);
+            }
+            if let Some(rate) = self.exchange_rate {
+                msg = format!("{} -> {:.2} CHF", msg, rate as f32 * (ocbal + lnbal));
+            }
+
+            msg.into()
         }
     ),
     update_channel: qt_method!(
         fn update_channel(&mut self) -> QString {
-            log_err_or(
+            self.log_err_or(
                 BdkWallet::get_channel_status(),
                 "channel balance unavailable".to_string(),
             )
@@ -56,58 +71,93 @@ struct Greeter {
     ),
     ldk_events: qt_method!(
         fn ldk_events(&mut self) -> QString {
-            log_err_or(BdkWallet::handle_ldk_event(), "".to_string()).into()
+            let msg = self.log_err_or(BdkWallet::handle_ldk_event(), "".to_string());
+            if !msg.is_empty() {
+                self.eventlog.push_front(msg);
+            }
+            self.eventlog.truncate(5);
+            self.eventlog
+                .iter()
+                .fold("".to_string(), |acc, msg| format!("{}\n{}", acc, msg))
+                .trim()
+                .into()
         }
     ),
     send: qt_method!(
         fn send(&mut self, addr: String, amount: String, desc: String) {
             if addr.is_empty() {
-                eprintln!("at least the address field needs to be filled");
+                let msg = "at least the address field needs to be filled".to_string();
+                eprintln!("{}", msg);
+                self.eventlog.push_front(msg);
             } else {
-                log_err(self.payto(&addr, &amount, &desc));
+                self.log_err(self.payto(&addr, &amount, &desc));
             }
         }
     ),
     channel_open: qt_method!(
         fn channel_open(&mut self, amount: String) {
             if amount.is_empty() {
-                eprintln!("the amount field needs to be filled");
+                let msg = "the amount field needs to be filled".to_string();
+                eprintln!("{}", msg);
+                self.eventlog.push_front(msg);
             } else {
-                log_err(self.channel_new(&amount));
+                self.log_err(self.channel_new(&amount));
             }
         }
     ),
     channel_close: qt_method!(
         fn channel_close(&mut self) {
-            log_err(BdkWallet::channel_close());
+            self.log_err(BdkWallet::channel_close());
         }
     ),
     request: qt_method!(
         fn request(&mut self, amount: String, desc: String) -> QString {
-            let invoice = log_err(self.invoice(&amount, &desc));
-            self.receiving_address = invoice.clone().into();
-            format!(
-                "file://{}",
-                log_err(self.generate_qr(&invoice)).to_str().unwrap()
-            )
+            if let Some(invoice) = self.log_err(self.invoice(&amount, &desc)) {
+                self.receiving_address = invoice.clone().into();
+                format!(
+                    "file://{}",
+                    self.log_err(self.generate_qr(&invoice))
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                )
+            } else {
+                "".to_string()
+            }
             .into()
         }
     ),
     address: qt_method!(
         fn address(&mut self) -> QString {
-            let addr = log_err(self.get_receiving_address());
+            let addr = self.log_err(self.get_receiving_address()).unwrap();
             self.receiving_address = addr.clone().into();
             addr.into()
         }
     ),
     address_qr: qt_method!(
         fn address_qr(&mut self) -> QString {
-            let addr = log_err(self.get_receiving_address());
+            let addr = self.log_err(self.get_receiving_address()).unwrap();
             self.receiving_address = addr.clone().into();
             format!(
                 "file://{}",
-                log_err(self.generate_qr(&addr)).to_str().unwrap()
+                self.log_err(self.generate_qr(&addr))
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
             )
+            .into()
+        }
+    ),
+    update_exchange_rate: qt_method!(
+        fn update_exchange_rate(&mut self) -> QString {
+            let rate = self.refresh_exchange_rate();
+            let rate = self.log_err(rate);
+            println!("exchange rate BTC-CHF: {:?}", rate);
+            if let Some(rate) = rate {
+                format!("{}", rate)
+            } else {
+                "".to_string()
+            }
             .into()
         }
     ),
@@ -118,7 +168,8 @@ struct Greeter {
             amount: String,
             desc: String,
         ) -> QString {
-            log_err(self.evaluate_input(&addr, &amount, &desc)).into()
+            self.log_err_or(self.evaluate_input(&addr, &amount, &desc), "".to_string())
+                .into()
         }
     ),
 }
@@ -191,24 +242,40 @@ impl Greeter {
 
         Ok(qr_file)
     }
-}
 
-fn log_err<T>(res: Result<T, String>) -> T {
-    match res {
-        Ok(d) => d,
-        Err(err) => {
-            eprintln!("{}", err);
-            panic!("{}", err);
+    fn refresh_exchange_rate(&mut self) -> Result<f64, String> {
+        let cmc = CmcBuilder::new(COINMARKETCAP_API_KEY)
+            .convert("CHF")
+            .build();
+        let rate = cmc
+            .price("BTC")
+            .map_err(|e| format!("Failed to get exchange rate: {}", e))?;
+        self.exchange_rate = Some(rate.clone());
+        let msg = format!("1 BTC = {:.2} CHF", rate);
+        self.eventlog.push_front(msg);
+        Ok(rate)
+    }
+
+    fn log_err<T>(&mut self, res: Result<T, String>) -> Option<T> {
+        match res {
+            Ok(d) => Some(d),
+            Err(err) => {
+                eprintln!("{}", err);
+                self.eventlog.push_front(err.clone());
+                //panic!("{}", err);
+                None
+            }
         }
     }
-}
 
-fn log_err_or<T>(res: Result<T, String>, fallback: T) -> T {
-    match res {
-        Ok(d) => d,
-        Err(err) => {
-            eprintln!("{}", err);
-            fallback
+    fn log_err_or<T>(&mut self, res: Result<T, String>, fallback: T) -> T {
+        match res {
+            Ok(d) => d,
+            Err(err) => {
+                eprintln!("{}", err);
+                self.eventlog.push_front(err);
+                fallback
+            }
         }
     }
 }
@@ -230,7 +297,7 @@ fn main() {
     let mut engine = QmlEngine::new();
 
     println!("Initializing the node singleton.");
-    log_err(BdkWallet::init_node());
+    BdkWallet::init_node().unwrap();
 
     println!("Loading file /qml/utlnwallet.qml.");
     engine.load_file("qrc:/qml/utlnwallet.qml".into());
