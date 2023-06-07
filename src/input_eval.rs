@@ -14,8 +14,11 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-use ldk_node::bitcoin::Address;
 use ldk_node::lightning_invoice::{Invoice, InvoiceDescription, SignedRawInvoice};
+use ldk_node::{
+    bitcoin::{secp256k1::PublicKey, Address},
+    NetAddress,
+};
 use lnurl::{api::LnUrlResponse, lightning_address::LightningAddress, lnurl::LnUrl, Builder};
 use regex::Regex;
 use std::{collections::HashMap, str::FromStr};
@@ -212,6 +215,20 @@ pub fn parse_satoshis(amount: &str) -> Result<u64, String> {
     let amount = f64::from_str(amount)
         .map_err(|e| format!("Failed to parse the satoshis from {:?} : {}", amount, e))?;
     Ok((amount * 100_000_000.0) as u64)
+}
+
+/// Checks if the input looks like a nodeid that could be used to open a channel
+pub fn is_node_id(input: &str) -> bool {
+    let id_addr = input.split("@").collect::<Vec<_>>();
+    assert_eq!(id_addr.len(), 2);
+    if PublicKey::from_str(id_addr[0]).is_err() {
+        return false;
+    }
+    if NetAddress::from_str(id_addr[1]).is_err() {
+        return false;
+    }
+
+    return true;
 }
 
 #[cfg(test)]
@@ -429,5 +446,30 @@ mod tests {
         }
         assert_eq!(resp.satoshis, None);
         assert_eq!(resp.description, "");
+    }
+
+    #[test]
+    fn test_nodeid_ulrichard() {
+        let inp = crate::constants::LN_ULR;
+        assert!(is_node_id(inp));
+    }
+
+    #[test]
+    fn test_nodeid_tor() {
+        let inp = "02fb0ba685e8f5be6eb39e5f1f2481b16673aa1019852a727b3140f5b0716cf48a@rquqr26p26lwgnanyjrr4mo33ri76y3a55xge57w52n5qlwp6sixzhad.onion:9735";
+        assert!(is_node_id(inp));
+    }
+
+    #[test]
+    fn test_nodeid_localhost() {
+        let inp =
+            "02fb0ba685e8f5be6eb39e5f1f2481b16673aa1019852a727b3140f5b0716cf48a@127.0.0.1:9735";
+        assert!(is_node_id(inp));
+    }
+
+    #[test]
+    fn test_nodeid_invalid_pubkey() {
+        let inp = "02fb0ba85e8f5beeb39e5f1f2481b1673aa1019852727b3140f5b0716cf48a@127.0.0.1:9735";
+        assert!(!is_node_id(inp));
     }
 }

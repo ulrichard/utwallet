@@ -64,13 +64,13 @@ impl BdkWallet {
         Ok(txid)
     }
 
-    pub fn channel_open(amount: u64) -> Result<(), String> {
+    pub fn channel_open(amount: u64, node_id: Option<&str>) -> Result<(), String> {
         let node_m = UTNODE
             .lock()
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
 
-        let id_addr = LN_ULR.split("@").collect::<Vec<_>>();
+        let id_addr = node_id.unwrap_or(LN_ULR).split("@").collect::<Vec<_>>();
         assert_eq!(id_addr.len(), 2);
         let node_id = PublicKey::from_str(id_addr[0]).unwrap();
         let node_addr = id_addr[1].parse().unwrap();

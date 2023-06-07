@@ -27,7 +27,7 @@ mod input_eval;
 mod qrc;
 mod wallet;
 
-use crate::input_eval::{parse_satoshis, InputEval, InputNetwork};
+use crate::input_eval::{is_node_id, parse_satoshis, InputEval, InputNetwork};
 use crate::wallet::BdkWallet;
 
 use qrcode_png::{Color, QrCode, QrCodeEcc};
@@ -69,11 +69,11 @@ struct Greeter {
         }
     ),
     channel_open: qt_method!(
-        fn channel_open(&mut self, amount: String) {
+        fn channel_open(&mut self, amount: String, node_id: String) {
             if amount.is_empty() {
                 eprintln!("the amount field needs to be filled");
             } else {
-                log_err(self.channel_new(&amount));
+                log_err(self.channel_new(&amount, &node_id));
             }
         }
     ),
@@ -145,9 +145,14 @@ impl Greeter {
         Ok(())
     }
 
-    fn channel_new(&self, amount: &str) -> Result<(), String> {
+    fn channel_new(&self, amount: &str, node_id: &str) -> Result<(), String> {
         let amount = parse_satoshis(amount)?;
-        BdkWallet::channel_open(amount)?;
+        let node_id = if is_node_id(node_id) {
+            Some(node_id)
+        } else {
+            None
+        };
+        BdkWallet::channel_open(amount, node_id)?;
         Ok(())
     }
 

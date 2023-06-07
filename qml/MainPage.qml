@@ -182,7 +182,7 @@ Page {
             text: i18n.tr('Channel Open')
             onClicked: {
                 main_timer.stop();
-                greeter.channel_open(send_amount.text);
+                greeter.channel_open(send_amount.text, send_address.text);
                 main_timer.start();
             }
         }
