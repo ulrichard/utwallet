@@ -141,6 +141,14 @@ Page {
 	ProgressBar {
 	    id: channel1
 	    value: 0.5
+	    visible: false
+	}
+
+	TextArea {
+	    id: eventlog
+            Layout.fillWidth: true
+            enabled: false
+	    text: "node is starting\n\n\n\n\n"
 	}
 
         Label {
@@ -190,6 +198,7 @@ Page {
         Button {
             id: btn_channel_close;
             text: i18n.tr('Channel Close')
+            enabled: false
             onClicked: {
                 main_timer.stop();
                 greeter.channel_close();
@@ -205,6 +214,7 @@ Page {
             
             onTriggered: {
                 main_timer.stop();
+                eventlog.color = "steelblue"
                 
                 header.title = greeter.update_balance();
                 receive_qr_code.source = greeter.address_qr();
@@ -214,9 +224,11 @@ Page {
                 if (chan == "") {
                     channel1.visible = false;
                     btn_channel_open.enabled = true;
+                    btn_channel_close.enabled = false;
                 } else {
                     channel1.visible = true;
                     btn_channel_open.enabled = false;
+                    btn_channel_close.enabled = true;
                     channel1.value = Math.abs(parseFloat(chan));
                     if (chan.startsWith("-")) {
                     	// channel1.color = "red";
@@ -225,10 +237,40 @@ Page {
                     }
                 }
 
-                var event_desc = greeter.ldk_events();
-
+                eventlog.color = "black"
                 main_timer.interval = 20000;
                 main_timer.start();
+            }
+        }
+
+        Timer {
+            id: exchange_timer;
+            interval: 600000;
+            running: true;
+            repeat: true
+
+            onTriggered: {
+                eventlog.color = "steelblue"
+
+                var rate = greeter.update_exchange_rate();
+
+                eventlog.color = "black"
+            }
+        }
+        Timer {
+            id: event_timer;
+            interval: 2000;
+            running: true;
+            repeat: true
+
+            onTriggered: {
+                event_timer.stop();
+                eventlog.color = "steelblue"
+
+                eventlog.text = greeter.ldk_events();
+
+                eventlog.color = "black"
+                event_timer.start();
             }
         }
     }
