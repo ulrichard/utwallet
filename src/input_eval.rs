@@ -220,7 +220,9 @@ pub fn parse_satoshis(amount: &str) -> Result<u64, String> {
 /// Checks if the input looks like a nodeid that could be used to open a channel
 pub fn is_node_id(input: &str) -> bool {
     let id_addr = input.split("@").collect::<Vec<_>>();
-    assert_eq!(id_addr.len(), 2);
+    if id_addr.len() != 2 {
+        return false;
+    }
     if PublicKey::from_str(id_addr[0]).is_err() {
         return false;
     }
@@ -470,6 +472,12 @@ mod tests {
     #[test]
     fn test_nodeid_invalid_pubkey() {
         let inp = "02fb0ba85e8f5beeb39e5f1f2481b1673aa1019852727b3140f5b0716cf48a@127.0.0.1:9735";
+        assert!(!is_node_id(inp));
+    }
+
+    #[test]
+    fn test_nodeid_empty() {
+        let inp = "";
         assert!(!is_node_id(inp));
     }
 }

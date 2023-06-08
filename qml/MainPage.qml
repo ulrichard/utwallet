@@ -213,6 +213,7 @@ Page {
             repeat: true
             
             onTriggered: {
+                console.log("main timer enter");
                 main_timer.stop();
                 eventlog.color = "steelblue"
                 
@@ -240,6 +241,7 @@ Page {
                 eventlog.color = "black"
                 main_timer.interval = 20000;
                 main_timer.start();
+                console.log("main timer leave");
             }
         }
 
@@ -250,11 +252,13 @@ Page {
             repeat: true
 
             onTriggered: {
+                console.log("exchange timer enter");
                 eventlog.color = "steelblue"
 
                 var rate = greeter.update_exchange_rate();
 
                 eventlog.color = "black"
+                console.log("exchange timer leave");
             }
         }
         Timer {
@@ -264,6 +268,7 @@ Page {
             repeat: true
 
             onTriggered: {
+                // console.log("event timer enter");
                 event_timer.stop();
                 eventlog.color = "steelblue"
 
@@ -271,6 +276,7 @@ Page {
 
                 eventlog.color = "black"
                 event_timer.start();
+                // console.log("event timer leave");
             }
         }
     }
