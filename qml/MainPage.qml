@@ -213,7 +213,7 @@ Page {
             repeat: true
             
             onTriggered: {
-                console.log("main timer enter");
+                console.time("main timer");
                 main_timer.stop();
                 eventlog.color = "steelblue"
                 
@@ -241,7 +241,7 @@ Page {
                 eventlog.color = "black"
                 main_timer.interval = 20000;
                 main_timer.start();
-                console.log("main timer leave");
+                console.timeEnd("main timer");
             }
         }
 
@@ -252,13 +252,13 @@ Page {
             repeat: true
 
             onTriggered: {
-                console.log("exchange timer enter");
+                console.time("exchange timer");
                 eventlog.color = "steelblue"
 
                 var rate = greeter.update_exchange_rate();
 
                 eventlog.color = "black"
-                console.log("exchange timer leave");
+                console.timeEnd("exchange timer");
             }
         }
         Timer {

@@ -183,6 +183,7 @@ impl BdkWallet {
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
 
+        println!("getting on-chain balance");
         let ocbal = node
             .onchain_balance()
             .map_err(|e| format!("Unable to get on-chain balance: {:?}", e))?
