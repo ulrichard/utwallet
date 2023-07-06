@@ -48,7 +48,7 @@ struct Greeter {
         fn update_balance(&mut self) -> QString {
             let (ocbal, lnbal) = self.log_err_or(BdkWallet::get_balance(), (0.0, 0.0));
 
-            let mut msg = format!("Balance: {} + {} BTC", ocbal, lnbal);
+            let mut msg = format!("Bal: {} + {} BTC", ocbal, lnbal);
             if self.exchange_rate.is_none() {
                 let rate = self.refresh_exchange_rate();
                 self.log_err_or(rate, 0.0);

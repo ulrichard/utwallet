@@ -81,16 +81,17 @@ impl InputEval {
         }
 
         // https://www.bolt11.org/
-        let rgx_bolt11 = r#"^lnbc[a-z0-9]{100,700}$"#;
+        let rgx_bolt11 = r#"^(?i)(LIGHTNING:)?lnbc[a-z0-9]{100,700}$"#;
         let re = Regex::new(&rgx_bolt11).map_err(|e| e.to_string())?;
         if re.is_match(recipient) {
+            let recipient = recipient.replace("LIGHTNING:", "").replace("lightning:", "");
             let invoice = str::parse::<Invoice>(&recipient).map_err(|e| e.to_string())?;
             let satoshis = if let Some(msat) = invoice.amount_milli_satoshis() {
                 Some(msat / 1_000)
             } else {
                 satoshis
             };
-            return Self::lightning(recipient, satoshis, descr);
+            return Self::lightning(&recipient, satoshis, descr);
         }
 
         // https://bolt12.org/
@@ -101,8 +102,8 @@ impl InputEval {
         }
 
         // LNURL https://github.com/lnurl/luds
-        if recipient.starts_with("LNURL") || recipient.starts_with("lightning:LNURL") {
-            let recipient = recipient.replace("lightning:", "");
+        if recipient.starts_with("LNURL") || recipient.starts_with("lightning:LNURL") || recipient.starts_with("LIGHTNING:LNURL") {
+            let recipient = recipient.replace("LIGHTNING:", "").replace("lightning:", "");
             let lnu = LnUrl::from_str(&recipient).map_err(|e| e.to_string())?;
             let url = lnu.url.as_str();
             return Self::ln_url(&url, satoshis, descr);
@@ -353,6 +354,32 @@ mod tests {
         assert_eq!(resp.description, desc);
         let exp = format!("{};{};{}", inp, 0.00351877, desc);
         assert_eq!(resp.gui_csv().unwrap(), exp);
+    }
+
+    #[test]
+    fn test_bolt11_timecatcher() {
+        let inp = "lnbc21u1pjgj7azpp5w9kue4qeexcjv8j7jjpvxhfsut25d07e6lxz9xq5x3ftdjrv8spqdpydpv5z6zndf44jm6zg9xnsarz2dmkww2p2dgqcqzrrxqyp2xqsp5mf6qel6ymkeuue833vnscdwdkyrl5gef225z9f776gn0pgmehsqq9qyyssqfn28qncnutmp9y3wvqxze4xtewqkxv4jtqvndhk4hqwhqr4fl5j80zy6jcwvud85r0v0vpdwqd0d93n53jcnv43ee3dxjww3tcvgc9sph6jczf";
+        let resp = InputEval::evaluate(inp, "", "").unwrap();
+        if let InputNetwork::Lightning(invoice) = resp.network {
+            assert_eq!(*"lnbc", invoice.to_string()[..4]);
+        } else {
+            panic!("not recognized as lightning invoice");
+        }
+        assert_eq!(resp.satoshis, Some(2100));
+        assert_eq!(resp.description, "hYAhSjkYoBAM8tbSwg9ASP");
+    }
+
+    #[test]
+    fn test_bolt11_ulrichard() {
+        let inp = "LIGHTNING:LNBC33327780P1PJF2SS6SP50PNHS5H63S0XVJLAJUJM68M6JYQQDLHW0FA4A2HCUTAVRR2N7U4SPP5WVLRGLGX53R5R2FV8DAFK88Q6WXKNN4PPC7S0QCCHHYNMMXDXM5QDQ9U2D2ZXQR3JSCQPJRZJQTZXVFSUXE4L92PF97TT4RCGPY2XALKMLWEXH899WQXF83L8NWV4XZMCSQQQTLQQQYQQQQLGQQQQQWGQVS9QX3QYSGQQZGVXP2RHFQ32DC3RQH2AE2QSMLZJGE9YC2JWQWZ3MDPZFULHPXPXWEVW0QAZN4MDF8593UZFXARP3CTMTGE6W6TEENQW5R7TSE5JHCQK7ZNKT";
+        let resp = InputEval::evaluate(inp, "", "").unwrap();
+        if let InputNetwork::Lightning(invoice) = resp.network {
+            assert_eq!(*"lnbc", invoice.to_string()[..4]);
+        } else {
+            panic!("not recognized as lightning invoice");
+        }
+        assert_eq!(resp.satoshis, Some(3332));
+        assert_eq!(resp.description, "⚡");
     }
 
     #[test]

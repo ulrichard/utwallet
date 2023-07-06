@@ -31,12 +31,12 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     str::FromStr,
-    sync::{Arc, Mutex},
+    sync::Mutex,
 };
 
 pub struct BdkWallet {}
 
-static UTNODE: Mutex<Option<Arc<Node<SqliteStore>>>> = Mutex::new(None);
+static UTNODE: Mutex<Option<Node<SqliteStore>>> = Mutex::new(None);
 
 /// A facade for bdk::Wallet with a singleton instance
 impl BdkWallet {
@@ -74,7 +74,7 @@ impl BdkWallet {
         assert_eq!(id_addr.len(), 2);
         let node_id = PublicKey::from_str(id_addr[0]).unwrap();
         let node_addr = id_addr[1].parse().unwrap();
-        node.connect_open_channel(node_id, node_addr, amount, None, false)
+        node.connect_open_channel(node_id, node_addr, amount, None, None, false)
             .map_err(|e| format!("Failed to open a channel: {:?}", e))?;
 
         Ok(())
@@ -173,7 +173,7 @@ impl BdkWallet {
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
 
-        node.new_funding_address()
+        node.new_onchain_address()
             .map_err(|e| format!("Unable to get an address: {:?}", e))
     }
 
@@ -185,9 +185,8 @@ impl BdkWallet {
 
         println!("getting on-chain balance");
         let ocbal = node
-            .onchain_balance()
-            .map_err(|e| format!("Unable to get on-chain balance: {:?}", e))?
-            .get_spendable();
+            .spendable_onchain_balance_sats()
+            .map_err(|e| format!("Unable to get on-chain balance: {:?}", e))?;
 
         println!("on-chain balance: {}", ocbal);
 
@@ -221,7 +220,7 @@ impl BdkWallet {
         }
     }
 
-    fn create_node() -> Result<Arc<Node<SqliteStore>>, String> {
+    fn create_node() -> Result<Node<SqliteStore>, String> {
         let app_data_path =
             unsafe { QStandardPaths::writable_location(StandardLocation::AppDataLocation) };
         let mnemonic_file = PathBuf::from(app_data_path.to_std_string()).join("mnemonic.txt");
@@ -229,13 +228,13 @@ impl BdkWallet {
         let ldk_dir = PathBuf::from(app_data_path.to_std_string()).join("ldk");
 
         println!("building the ldk-node");
-        let builder = Builder::new();
+        let mut builder = Builder::new();
         builder.set_network(Network::Bitcoin);
         builder.set_esplora_server(ESPLORA_SERVERS[1].to_string());
         builder.set_entropy_bip39_mnemonic(mnemonic, None);
         builder.set_storage_dir_path(ldk_dir.to_str().unwrap().to_string());
         builder.set_gossip_source_rgs(RAPID_GOSSIP_SYNC_URL.to_string());
-        let node = builder.build();
+        let node = builder.build().map_err(|e| format!("Failed to build ldk-node: {:?}", e))?;
 
         println!("starting the ldk-node");
         node.start().unwrap();
@@ -298,7 +297,7 @@ mod tests {
         /// Instance of the electrs electrum server
         electrsd: ElectrsD,
         /// ldk-node instances
-        ldk_nodes: Vec<Arc<Node<SqliteStore>>>,
+        ldk_nodes: Vec<Node<SqliteStore>>,
     }
 
     impl RegTestEnv {
