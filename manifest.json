@@ -7,17 +7,10 @@
         "utlnwallet": {
             "apparmor": "utlnwallet.apparmor",
             "desktop":  "utlnwallet.desktop",
-            "urls" : [
-		    {
-		    	"protocol" : "bitcoin"
-		    },
-		    {
-		    	"protocol" : "lightning"
-		    }
-            ]
+            "urls" : "dispatcher.json"
         }
     },
-    "version": "0.0.9",
+    "version": "0.0.8",
     "maintainer": "Richard Ulrich <richi+utlnwallet@ulrichard.ch>",
     "framework" : "@CLICK_FRAMEWORK@"
 }
