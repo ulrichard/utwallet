@@ -36,6 +36,25 @@ Page {
         
     anchors.fill: parent
 
+    Component.onCompleted: {
+        if (args.values.url && (args.values.url.match(/^bitcoin/) || args.values.url.match(/^lightning/))) {
+            console.log("Incoming Url on Closed App");
+            handleUrl(args.values.url);
+
+        } else if (Qt.application.arguments && Qt.application.arguments.length > 0) {
+            console.log("Incoming URl fromArguments")
+
+            //TODO: Do we need to handle more than 1 url?
+            for (var i = 0; i < Qt.application.arguments.length; i++) {
+                if (Qt.application.arguments[i].match(/^bitcoin/) || Qt.application.arguments[i].match(/^lightning/)) {
+                    handleUrl(Qt.application.arguments[i]);
+                }
+            }
+        }
+
+    }
+
+
     header: PageHeader {
         id: header
         title: i18n.tr('utwallet')
@@ -72,9 +91,6 @@ Page {
             id: send_address
             placeholderText: i18n.tr('Address or Invoice')
             Layout.fillWidth: true
-//            onEditingFinished: {
-//                greeter.evaluate_address_input(send_address.text, send_amount.text, desc_txt.text);
-//            }
         }
         
         Label {
@@ -113,6 +129,7 @@ Page {
         }
 
         Button {
+            id: btn_eval
             text: i18n.tr('Evaluate Address or Invoice')
             onClicked: {
                 var txt = greeter.evaluate_address_input(send_address.text, send_amount.text, desc_txt.text);
@@ -206,6 +223,15 @@ Page {
             }
         }
 
+        Button {
+            text: i18n.tr('Arcade')
+            visible: false
+            enabled: true
+            onClicked: {
+                handleUrl('LNURL1DP68GURN8GHJ7ARFD4JKXCT5VD5X2U3WD3HXY6T5WVHXGEF0D3H82UNVV3JHV6TRV5HKZURF9AMRYTMVDE6HYMP0F32HQDMPV46XXC6NWDE8XUPKG56RJU28W4AR7URFDC7NZV3XV9KK7ATWWS7NQT34YEJ82UNPW35K7M3AXYCRQVQJEJZT9');
+            }
+        }
+
         Timer {
             id: main_timer;
             interval: 2000;
@@ -279,5 +305,34 @@ Page {
                 // console.log("event timer leave");
             }
         }
+
+        Connections {
+            target: UriHandler
+
+            onOpened: {
+                console.log('Open from UriHandler')
+
+                if (uris.length > 0) {
+                    console.log('Incoming call from UriHandler ' + uris[0]);
+                    handleUrl(uris[0]);
+                }
+            }
+        }
+
     }
+
+    function handleUrl(url) {
+        if (url === "") {
+            console.log("DEBUG: Error. The incoming url is empty");
+            return;
+        }
+
+        var txt = greeter.evaluate_address_input(url, '', '');
+        var words = txt.split(";");
+        send_address.text = words[0];
+        send_amount.text = words[1];
+        desc_txt.text = words[2];
+    }
+
+
 }

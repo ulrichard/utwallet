@@ -6,10 +6,18 @@
     "hooks": {
         "utlnwallet": {
             "apparmor": "utlnwallet.apparmor",
-            "desktop":  "utlnwallet.desktop"
+            "desktop":  "utlnwallet.desktop",
+            "urls" : [
+		    {
+		    	"protocol" : "bitcoin"
+		    },
+		    {
+		    	"protocol" : "lightning"
+		    }
+            ]
         }
     },
-    "version": "0.0.8",
+    "version": "0.0.9",
     "maintainer": "Richard Ulrich <richi+utlnwallet@ulrichard.ch>",
     "framework" : "@CLICK_FRAMEWORK@"
 }
