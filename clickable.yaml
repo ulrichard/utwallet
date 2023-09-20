@@ -4,6 +4,7 @@ framework: ubuntu-sdk-20.04
 kill: utlnwallet
 install_root_data:
 - manifest.json
+- dispatcher.json
 - utlnwallet.apparmor
 - utlnwallet.desktop
 - assets
