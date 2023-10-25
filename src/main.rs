@@ -25,6 +25,7 @@ use qt_core::{q_standard_paths::StandardLocation, QStandardPaths};
 mod constants;
 mod input_eval;
 mod qrc;
+mod sweeper;
 mod wallet;
 
 use crate::constants::COINMARKETCAP_API_KEY;
@@ -86,11 +87,10 @@ struct Greeter {
     send: qt_method!(
         fn send(&mut self, addr: String, amount: String, desc: String) {
             if addr.is_empty() {
-                let msg = "at least the address field needs to be filled".to_string();
-                eprintln!("{}", msg);
+                self.eventlog
+                    .push_front("at least the address field needs to be filled".to_string());
+            } else if let Some(msg) = self.log_err(self.payto(&addr, &amount, &desc)) {
                 self.eventlog.push_front(msg);
-            } else {
-                self.log_err(self.payto(&addr, &amount, &desc));
             }
         }
     ),
@@ -161,6 +161,20 @@ struct Greeter {
             .into()
         }
     ),
+    fiat: qt_method!(
+        fn fiat(&mut self, amount: String) -> QString {
+            if let Ok(amount) = amount.parse::<f64>() {
+                if let Some(rate) = self.exchange_rate {
+                    format!("CHF {:.2}", amount * rate)
+                } else {
+                    "".to_string()
+                }
+            } else {
+                "".to_string()
+            }
+            .into()
+        }
+    ),
     evaluate_address_input: qt_method!(
         fn evaluate_address_input(
             &mut self,
@@ -175,25 +189,27 @@ struct Greeter {
 }
 
 impl Greeter {
-    fn payto(&self, addr: &str, bitcoins: &str, desc: &str) -> Result<(), String> {
+    fn payto(&self, addr: &str, bitcoins: &str, desc: &str) -> Result<String, String> {
         let satoshis = if bitcoins.is_empty() {
             None
         } else {
             Some(parse_satoshis(bitcoins)?)
         };
         let inpeval = InputEval::evaluate(addr, bitcoins, desc)?;
-        match inpeval.network {
+        let msg = match inpeval.network {
             InputNetwork::Mainnet(addr) => {
                 if let Some(satoshis) = satoshis {
-                    Ok(BdkWallet::payto(addr, satoshis)?.to_string())
+                    BdkWallet::payto(addr, satoshis)?.to_string()
                 } else {
-                    Err("Amount field needs to be filled!".to_string())
+                    return Err("Amount field needs to be filled!".to_string());
                 }
             }
-            InputNetwork::Lightning(invoice) => BdkWallet::pay_invoice(&invoice, satoshis),
-        }?;
+            InputNetwork::Lightning(invoice) => BdkWallet::pay_invoice(&invoice, satoshis)?,
+            InputNetwork::LnWithdraw(lnurlw) => BdkWallet::withdraw(&lnurlw, satoshis)?,
+            InputNetwork::PrivKey(privkeys) => BdkWallet::sweep(&privkeys)?,
+        };
 
-        Ok(())
+        Ok(msg)
     }
 
     fn channel_new(&self, amount: &str, node_id: &str) -> Result<(), String> {

@@ -4,5 +4,8 @@
     },
     {
     	"protocol" : "lightning"
+    },
+    {
+    	"protocol" : "lnurlw"
     }
 ]

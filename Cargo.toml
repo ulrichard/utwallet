@@ -1,6 +1,6 @@
 [package]
 name = "utlnwallet"
-version = "0.0.9"
+version = "0.0.10"
 authors = ["Richard Ulrich <richi+utwallet@ulrichard.ch>"]
 edition = "2021"
 build = "src/build.rs"
@@ -20,6 +20,12 @@ regex = "1"
 rand_core = "0.6"
 lnurl-rs = "0.2"
 cmc = "0.3"
+electrum2descriptors = "0.4.4"
+# the following are also dependencies of ldk-node that are not exposed. The versions have to be matched manually
+bdk = { version = "0.28.0", default-features = false, features = ["std", "use-esplora-async", "keys-bip39"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "time", "sync"] }
+miniscript = "9.0"
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 
 [build-dependencies]
 cpp_build = "0.5"
@@ -27,4 +33,4 @@ cmake = "0.1"
 
 [dev-dependencies]
 electrsd = { version= "0.23", features = ["bitcoind_23_0", "esplora_a33e97e1", "legacy"] }
-
+rstest = "0.11"

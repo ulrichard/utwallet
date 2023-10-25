@@ -17,12 +17,14 @@
 use qt_core::{q_standard_paths::StandardLocation, QStandardPaths};
 
 use crate::constants::{ESPLORA_SERVERS, LN_ULR, RAPID_GOSSIP_SYNC_URL};
+use crate::input_eval::PrivateKeys;
 
 use ldk_node::bip39::Mnemonic;
 use ldk_node::bitcoin::{secp256k1::PublicKey, Address, Network, Txid};
 use ldk_node::io::SqliteStore;
 use ldk_node::lightning_invoice::Invoice;
 use ldk_node::{Builder, /*Event,*/ Node};
+use lnurl::{api::LnUrlResponse, Builder as LnUrlBuilder};
 use rand_core::{OsRng, RngCore};
 use std::{
     fs,
@@ -146,6 +148,69 @@ impl BdkWallet {
         Ok(ph)
     }
 
+    pub fn withdraw(url: &str, satoshis: Option<u64>) -> Result<String, String> {
+        let url = url.replace("lnurlw://", "https://");
+        let client = LnUrlBuilder::default()
+            .build_blocking()
+            .map_err(|e| e.to_string())?;
+        let resp = client
+            .make_request(&url)
+            .map_err(|e| format!("Failed to query lnurl: {}", e))?;
+        if let LnUrlResponse::LnUrlWithdrawResponse(lnurlw) = resp {
+            println!("{:?}", lnurlw);
+            let msats = if let Some(sats) = satoshis {
+                if sats * 1_000 > lnurlw.max_withdrawable {
+                    return Err(format!(
+                        "payment {} is above {}",
+                        sats * 1_000,
+                        lnurlw.max_withdrawable,
+                    ));
+                }
+                if let Some(minw) = lnurlw.min_withdrawable {
+                    if sats * 1_000 < minw {
+                        return Err(format!("payment {} is below {}", sats * 1_000, minw,));
+                    }
+                }
+                sats * 1_000
+            } else {
+                lnurlw.max_withdrawable
+            };
+            let invoice = Self::create_invoice(Some(msats / 1_000), &lnurlw.default_description)?;
+            let url = format!(
+                "{}&num_satoshis={}&k1={}&pr={}",
+                lnurlw.callback,
+                msats / 1_000,
+                lnurlw.k1,
+                invoice
+            );
+            let rt = tokio::runtime::Runtime::new()
+                .map_err(|e| format!("Failed to create a tokio runtime: {}", e))?;
+
+            let resp = rt
+                .block_on(reqwest::get(url))
+                .map_err(|e| format!("failed to request lnurl payment: {}", e))?;
+            let body = rt
+                .block_on(resp.text())
+                .map_err(|e| format!("failed to receive lnurl payment response: {}", e))?;
+            println!("lnurl response: {}", body); // k1 is required?
+
+            Ok(body)
+        } else {
+            Err("invalid response to lnurl".to_string())
+        }
+    }
+
+    pub fn sweep(privkeys: &PrivateKeys) -> Result<String, String> {
+        let sw = crate::sweeper::Sweeper {
+            esplora_url: ESPLORA_SERVERS[0].to_string(),
+            network: Network::Bitcoin,
+        };
+        let rt = tokio::runtime::Runtime::new()
+            .map_err(|e| format!("Failed to create a tokio runtime: {}", e))?;
+
+        rt.block_on(sw.sweep(privkeys, &Self::get_address()?))
+    }
+
     pub fn handle_ldk_event() -> Result<String, String> {
         let node_m = UTNODE
             .lock()
@@ -234,7 +299,9 @@ impl BdkWallet {
         builder.set_entropy_bip39_mnemonic(mnemonic, None);
         builder.set_storage_dir_path(ldk_dir.to_str().unwrap().to_string());
         builder.set_gossip_source_rgs(RAPID_GOSSIP_SYNC_URL.to_string());
-        let node = builder.build().map_err(|e| format!("Failed to build ldk-node: {:?}", e))?;
+        let node = builder
+            .build()
+            .map_err(|e| format!("Failed to build ldk-node: {:?}", e))?;
 
         println!("starting the ldk-node");
         node.start().unwrap();
@@ -322,12 +389,12 @@ mod tests {
                         IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                         Self::get_available_port(),
                     );
-                    let builder = Builder::new();
+                    let mut builder = Builder::new();
                     builder.set_network(Network::Regtest);
                     builder.set_esplora_server(electrsd.esplora_url.clone().unwrap());
-                    let node = builder.build();
+                    let node = builder.build().unwrap();
                     node.start().unwrap();
-                    println!("node {:?} starting at {:?}", i, listen);
+                    println!("{:?} starting at {:?}", i, listen);
                     node
                 })
                 .collect::<Vec<_>>();
@@ -345,9 +412,10 @@ mod tests {
             num_blocks
                 .iter()
                 .zip(self.ldk_nodes.iter())
-                .for_each(|(num_blocks, node)| {
-                    let addr = node.new_funding_address().unwrap();
-                    println!("Generating {} blocks to {}", num_blocks, addr);
+                .enumerate()
+                .for_each(|(i, (num_blocks, node))| {
+                    let addr = node.new_onchain_address().unwrap();
+                    println!("{} Generating {} blocks to {}", i, num_blocks, addr);
                     self.generate_to_address(*num_blocks, &addr);
                 });
 
@@ -356,7 +424,7 @@ mod tests {
                 .ldk_nodes
                 .last()
                 .unwrap()
-                .new_funding_address()
+                .new_onchain_address()
                 .unwrap();
             println!("Generating {} blocks to {}", 100, addr);
             self.generate_to_address(100, &addr);
@@ -371,31 +439,27 @@ mod tests {
                         .map(|i| (i, node.sync_wallets()))
                         .find(|(i, r)| {
                             if let Err(e) = r {
-                                println!("{:?} : {:?}", i, e);
+                                println!("{:?} sync : {:?}", i, e);
                                 sleep(Duration::from_secs(1));
                             }
                             r.is_ok()
                         });
-                    //assert!(success.is_some());
+                    // assert!(success.is_some());
 
                     // checking the on-chain balance of the nodes
                     (0..5).find(|_| {
-                        let bal = node.onchain_balance().unwrap().confirmed;
+                        let bal = node.spendable_onchain_balance_sats().unwrap();
                         if bal == 0 {
                             sleep(Duration::from_secs(1));
                         }
                         bal > 0
                     });
-                    let bal = node.onchain_balance().unwrap();
+                    let bal = node.spendable_onchain_balance_sats().unwrap();
                     println!("{:?}", bal);
                     let expected = *num_blocks as u64 * 5_000_000_000;
-                    assert_eq!(
-                        bal.confirmed, expected,
-                        "node {} has a confirmed balance of {}",
-                        i, bal
-                    );
+                    assert_eq!(bal, expected, "node {} has a balance of {}", i, bal);
                 });
-            assert_eq!(self.get_height(), num_blocks.iter().sum::<usize>() + 100);
+            assert_eq!(self.get_height(), num_blocks.iter().sum::<usize>() + 101);
         }
 
         /// open channels
@@ -408,6 +472,7 @@ mod tests {
                     n2.listening_address().unwrap().clone(),
                     sats * 1_000,
                     None,
+                    None,
                     true,
                 )
                 .unwrap();
@@ -417,7 +482,7 @@ mod tests {
                 //println!("ldk event: {:?}", event);
                 //node.event_handled();
 
-                self.generate_to_address(3, &n1.new_funding_address().unwrap());
+                self.generate_to_address(3, &n1.new_onchain_address().unwrap());
                 let channels = n1.list_channels();
                 let chan = channels.last().unwrap();
                 println!("new channel: {:?}", chan);
@@ -465,7 +530,7 @@ mod tests {
     ///      0 --------> 1
     fn test_regtest_two_nodes() {
         let regtest_env = RegTestEnv::new(2);
-        regtest_env.fund_on_chain_wallets(&[1, 1], 5);
+        regtest_env.fund_on_chain_wallets(&[1, 1], 10);
         regtest_env.open_channels(&[(0, 1, 1_000_000)]);
     }
 
@@ -479,7 +544,7 @@ mod tests {
     ///            > 2 ---> 3
     fn test_regtest_six_nodes() {
         let regtest_env = RegTestEnv::new(6);
-        regtest_env.fund_on_chain_wallets(&[2, 2, 2, 2, 2, 2], 5);
+        regtest_env.fund_on_chain_wallets(&[2, 2, 2, 2, 2, 2], 10);
         regtest_env.open_channels(&[
             (0, 1, 1_000_000_000),
             (0, 2, 1_000_000_000),
@@ -489,5 +554,11 @@ mod tests {
             (3, 4, 1_000_000_000),
             (4, 5, 2_000_000_000),
         ]);
+    }
+
+    #[test]
+    fn test_regtest_sweep() {
+        let regtest_env = RegTestEnv::new(1);
+        regtest_env.fund_on_chain_wallets(&[1], 10);
     }
 }
