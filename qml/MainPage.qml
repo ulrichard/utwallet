@@ -93,15 +93,39 @@ Page {
             Layout.fillWidth: true
         }
         
+        Button {
+            id: btn_eval
+            text: i18n.tr('Evaluate Address or Invoice')
+            onClicked: {
+                var txt = greeter.evaluate_address_input(send_address.text, send_amount.text, desc_txt.text);
+                var words = txt.split(";");
+                send_address.text = words[0];
+                send_amount.text = words[1];
+                desc_txt.text = words[2];
+            }
+        }
+
         Label {
             id: label_send_amount
             text: i18n.tr('Amount [BTC]')
         }
         
-        TextField {
-            id: send_amount
-            placeholderText: i18n.tr('Amount')
-            width: units.gu(20)
+        RowLayout {
+            spacing: units.gu(2)
+
+            TextField {
+                id: send_amount
+                placeholderText: i18n.tr('Amount')
+                width: units.gu(20)
+                onTextChanged: {
+                    label_fiat.text = greeter.fiat(send_amount.text);
+                }
+            }
+
+            Label {
+                id: label_fiat
+                text: i18n.tr('CHF 0')
+            }
         }
 
         Label {
@@ -115,43 +139,35 @@ Page {
             width: units.gu(20)
         }
 
-        Button {
-            text: i18n.tr('Send')
-            onClicked: {
-                main_timer.stop();
+        RowLayout {
+            spacing: units.gu(2)
 
-                greeter.send(send_address.text, send_amount.text, desc_txt.text);
-                send_address.text = "";
+            Button {
+                text: i18n.tr('Send')
+                onClicked: {
+                    main_timer.stop();
 
-                main_timer.interval = 1000;
-                main_timer.start();
+                    greeter.send(send_address.text, send_amount.text, desc_txt.text);
+                    send_address.text = "";
+
+                    main_timer.interval = 1000;
+                    main_timer.start();
+                }
             }
-        }
 
-        Button {
-            id: btn_eval
-            text: i18n.tr('Evaluate Address or Invoice')
-            onClicked: {
-                var txt = greeter.evaluate_address_input(send_address.text, send_amount.text, desc_txt.text);
-                var words = txt.split(";");
-                send_address.text = words[0];
-                send_amount.text = words[1];
-                desc_txt.text = words[2];
-            }
-        }
+            Button {
+                text: i18n.tr('Create Invoice')
+                onClicked: {
+                    main_timer.stop();
 
-        Button {
-            text: i18n.tr('Create Invoice')
-            onClicked: {
-                main_timer.stop();
+                    receive_qr_code.visible = false
+                    receive_qr_code.source = greeter.request(send_amount.text, desc_txt.text);
+                    receive_qr_code.visible = true;
+                    label_receive_addr.text = greeter.receiving_address;
 
-                receive_qr_code.visible = false
-                receive_qr_code.source = greeter.request(send_amount.text, desc_txt.text);
-                receive_qr_code.visible = true;
-                label_receive_addr.text = greeter.receiving_address;
-
-                main_timer.interval = 10000;
-                main_timer.start();
+                    main_timer.interval = 10000;
+                    main_timer.start();
+                }
             }
         }
 
@@ -202,33 +218,37 @@ Page {
 
         }
         
-        Button {
-            id: btn_channel_open;
-            text: i18n.tr('Channel Open')
-            onClicked: {
-                main_timer.stop();
-                greeter.channel_open(send_amount.text, send_address.text);
-                main_timer.start();
-            }
-        }
+        RowLayout {
+            spacing: units.gu(2)
 
-        Button {
-            id: btn_channel_close;
-            text: i18n.tr('Channel Close')
-            enabled: false
-            onClicked: {
-                main_timer.stop();
-                greeter.channel_close();
-                main_timer.start();
+            Button {
+                id: btn_channel_open;
+                text: i18n.tr('Channel Open')
+                onClicked: {
+                    main_timer.stop();
+                    greeter.channel_open(send_amount.text, send_address.text);
+                    main_timer.start();
+                }
             }
-        }
 
-        Button {
-            text: i18n.tr('Arcade')
-            visible: false
-            enabled: true
-            onClicked: {
-                handleUrl('LNURL1DP68GURN8GHJ7ARFD4JKXCT5VD5X2U3WD3HXY6T5WVHXGEF0D3H82UNVV3JHV6TRV5HKZURF9AMRYTMVDE6HYMP0F32HQDMPV46XXC6NWDE8XUPKG56RJU28W4AR7URFDC7NZV3XV9KK7ATWWS7NQT34YEJ82UNPW35K7M3AXYCRQVQJEJZT9');
+            Button {
+                id: btn_channel_close;
+                text: i18n.tr('Channel Close')
+                enabled: false
+                onClicked: {
+                    main_timer.stop();
+                    greeter.channel_close();
+                    main_timer.start();
+                }
+            }
+
+            Button {
+                text: i18n.tr('Arcade')
+                visible: false
+                enabled: true
+                onClicked: {
+                    handleUrl('LNURL1DP68GURN8GHJ7ARFD4JKXCT5VD5X2U3WD3HXY6T5WVHXGEF0D3H82UNVV3JHV6TRV5HKZURF9AMRYTMVDE6HYMP0F32HQDMPV46XXC6NWDE8XUPKG56RJU28W4AR7URFDC7NZV3XV9KK7ATWWS7NQT34YEJ82UNPW35K7M3AXYCRQVQJEJZT9');
+                }
             }
         }
 

@@ -16,10 +16,12 @@
 
 use ldk_node::lightning_invoice::{Invoice, InvoiceDescription, SignedRawInvoice};
 use ldk_node::{
-    bitcoin::{secp256k1::PublicKey, Address},
+    bitcoin::{secp256k1::PublicKey, util::bip32::ExtendedPrivKey, Address, PrivateKey},
     NetAddress,
 };
+use libelectrum2descriptors::ElectrumExtendedPrivKey;
 use lnurl::{api::LnUrlResponse, lightning_address::LightningAddress, lnurl::LnUrl, Builder};
+use miniscript::Descriptor;
 use regex::Regex;
 use std::{collections::HashMap, str::FromStr};
 
@@ -29,9 +31,27 @@ pub struct InputEval {
     pub description: String,
 }
 
+pub enum PrivateKeys {
+    Pk(PrivateKey),
+    Epk(ExtendedPrivKey),
+    Desc(Descriptor<String>),
+}
+
+impl PrivateKeys {
+    pub fn to_string(&self) -> String {
+        match self {
+            Self::Pk(pk) => pk.to_wif(),
+            Self::Epk(epk) => epk.to_string(),
+            Self::Desc(desc) => desc.to_string(),
+        }
+    }
+}
+
 pub enum InputNetwork {
     Mainnet(Address),
     Lightning(Invoice),
+    PrivKey(PrivateKeys),
+    LnWithdraw(String),
 }
 
 impl InputEval {
@@ -80,11 +100,51 @@ impl InputEval {
             return Self::mainnet(&addr, satoshis, descr);
         }
 
+        // private key
+        if let Ok(pk) = PrivateKey::from_wif(&recipient) {
+            return Ok(Self {
+                network: InputNetwork::PrivKey(PrivateKeys::Pk(pk)),
+                satoshis: None,
+                description: "sweep private key".to_string(),
+            });
+        }
+
+        // extended private key
+        if let Ok(xprv) = ExtendedPrivKey::from_str(&recipient) {
+            return Ok(Self {
+                network: InputNetwork::PrivKey(PrivateKeys::Epk(xprv)),
+                satoshis: None,
+                description: "sweep private keys".to_string(),
+            });
+        }
+
+        // electrum extended private key
+        if let Ok(exprv) = ElectrumExtendedPrivKey::from_str(recipient) {
+            return Ok(Self {
+                network: InputNetwork::PrivKey(PrivateKeys::Epk(*exprv.xprv())),
+                satoshis: None,
+                description: "sweep private keys".to_string(),
+            });
+        }
+
+        // miniscript descriptor
+        if let Ok(desc) = Descriptor::<String>::from_str(&recipient) {
+            desc.sanity_check()
+                .map_err(|e| format!("Descriptor failed sanity check: {}", e))?;
+            return Ok(Self {
+                network: InputNetwork::PrivKey(PrivateKeys::Desc(desc)),
+                satoshis: None,
+                description: "sweep private keys".to_string(),
+            });
+        }
+
         // https://www.bolt11.org/
         let rgx_bolt11 = r#"^(?i)(LIGHTNING:)?lnbc[a-z0-9]{100,700}$"#;
         let re = Regex::new(&rgx_bolt11).map_err(|e| e.to_string())?;
         if re.is_match(recipient) {
-            let recipient = recipient.replace("LIGHTNING:", "").replace("lightning:", "");
+            let recipient = recipient
+                .replace("LIGHTNING:", "")
+                .replace("lightning:", "");
             let invoice = str::parse::<Invoice>(&recipient).map_err(|e| e.to_string())?;
             let satoshis = if let Some(msat) = invoice.amount_milli_satoshis() {
                 Some(msat / 1_000)
@@ -102,11 +162,23 @@ impl InputEval {
         }
 
         // LNURL https://github.com/lnurl/luds
-        if recipient.starts_with("LNURL") || recipient.starts_with("lightning:LNURL") || recipient.starts_with("LIGHTNING:LNURL") {
-            let recipient = recipient.replace("LIGHTNING:", "").replace("lightning:", "");
+        if recipient.starts_with("LNURL")
+            || recipient.starts_with("lightning:LNURL")
+            || recipient.starts_with("LIGHTNING:LNURL")
+        {
+            let recipient = recipient
+                .replace("LIGHTNING:", "")
+                .replace("lightning:", "");
             let lnu = LnUrl::from_str(&recipient).map_err(|e| e.to_string())?;
             let url = lnu.url.as_str();
             return Self::ln_url(&url, satoshis, descr);
+        }
+
+        // lnurlw
+        if recipient.starts_with("lnurlw://") || recipient.contains("api.swiss-bitcoin-pay.ch/card")
+        {
+            let recipient = recipient.replace("lnurlw://", "https://");
+            return Self::ln_url(&recipient, satoshis, descr);
         }
 
         // LNURL https://github.com/lnurl/luds
@@ -167,7 +239,9 @@ impl InputEval {
         let client = Builder::default()
             .build_blocking()
             .map_err(|e| e.to_string())?;
-        let resp = client.make_request(url).map_err(|e| e.to_string())?;
+        let resp = client
+            .make_request(url)
+            .map_err(|e| format!("Failed to query lnurl: {}", e))?;
         match resp {
             LnUrlResponse::LnUrlPayResponse(pay) => {
                 let msats = if let Some(sats) = satoshis {
@@ -187,7 +261,32 @@ impl InputEval {
                 let invoice = resp.invoice();
                 Self::lightning(&invoice.to_string(), Some(msats / 1_000), description)
             }
-            LnUrlResponse::LnUrlWithdrawResponse(_) | LnUrlResponse::LnUrlChannelResponse(_) => {
+            LnUrlResponse::LnUrlWithdrawResponse(lnurlw) => {
+                let msats = if let Some(sats) = satoshis {
+                    if sats * 1_000 > lnurlw.max_withdrawable {
+                        return Err(format!(
+                            "payment {} is above {}",
+                            sats * 1_000,
+                            lnurlw.max_withdrawable,
+                        ));
+                    }
+                    if let Some(minw) = lnurlw.min_withdrawable {
+                        if sats * 1_000 < minw {
+                            return Err(format!("payment {} is below {}", sats * 1_000, minw,));
+                        }
+                    }
+                    sats * 1_000
+                } else {
+                    lnurlw.max_withdrawable
+                };
+
+                Ok(Self {
+                    network: InputNetwork::LnWithdraw(url.to_string()),
+                    satoshis: Some(msats / 1_000),
+                    description: lnurlw.default_description,
+                })
+            }
+            LnUrlResponse::LnUrlChannelResponse(_) => {
                 Err("LNURL withdraw and channel are not implemented yet".to_string())
             }
         }
@@ -198,13 +297,14 @@ impl InputEval {
         let recipient = match &self.network {
             InputNetwork::Mainnet(addr) => addr.to_string(),
             InputNetwork::Lightning(invoice) => invoice.to_string(),
+            InputNetwork::LnWithdraw(ss) => ss.to_string(),
+            InputNetwork::PrivKey(ss) => ss.to_string(),
         };
-        Ok(format!(
-            "{};{};{}",
-            recipient,
-            self.satoshis.unwrap_or(0) as f32 / 100_000_000.0,
-            self.description
-        ))
+        let sats = match self.satoshis {
+            Some(s) => format!("{}", s as f32 / 100_000_000.0),
+            None => "".to_string(),
+        };
+        Ok(format!("{};{};{}", recipient, sats, self.description))
     }
 }
 
@@ -324,6 +424,66 @@ mod tests {
             resp.gui_csv().unwrap(),
             "bc1qa8dn66xn2yq4fcaee4f0gwkkr6e6em643cm8fa;100;test"
         );
+    }
+
+    #[test]
+    fn test_priv_key() {
+        let inp = "KxWvpvpY9C5weJGWpUMQqHt88Xktt7nZDZPHbpJjEuUaDgeMHJuw";
+        let resp = InputEval::evaluate(inp, "", "").unwrap();
+        if let InputNetwork::PrivKey(ref key) = resp.network {
+            assert_eq!(
+                "KxWvpvpY9C5weJGWpUMQqHt88Xktt7nZDZPHbpJjEuUaDgeMHJuw",
+                key.to_string()
+            );
+        } else {
+            panic!("not recognized as private key address");
+        }
+    }
+
+    #[test]
+    fn test_xprv() {
+        let inp = "xprv9z1Nt86QQeoGXTjrvKgbFT924JeV1qmo2QV6m8YYTWkaVVWNc3nmeTTKsoq2PKVMfQLUKchQbazkT5FqLo4BUC2P2rVFmDnE46QBNjiAsLP";
+        let resp = InputEval::evaluate(inp, "", "").unwrap();
+        if let InputNetwork::PrivKey(ref key) = resp.network {
+            assert_eq!(
+                "xprv9z1Nt86QQeoGXTjrvKgbFT924JeV1qmo2QV6m8YYTWkaVVWNc3nmeTTKsoq2PKVMfQLUKchQbazkT5FqLo4BUC2P2rVFmDnE46QBNjiAsLP",
+                key.to_string()
+            );
+        } else {
+            panic!("not recognized as private key address");
+        }
+    }
+
+    #[test]
+    fn test_zprv() {
+        let inp = "zprvAZLoT7yPmyP5qVdL4pdmE2tFeGx1BWSbMwkMwXwPE6z3E1qrYCY4HsZPkRXHnziAB8uSpMzjiDM3jbkQsnWWDAkVtsMo1L9sES5xeJMq3YV";
+        let resp = InputEval::evaluate(inp, "", "").unwrap();
+        if let InputNetwork::PrivKey(ref key) = resp.network {
+            assert_eq!(
+                "xprv9ugGqndZUcJ88uF6Q74WorhFJLf7JGTbXihvNk9cU6EH7pDQ2tCw3kF7i1c7oBQKMrfqKQocntdwy2XHSPgUchPJABxwqWWtgyxfsAdXcKZ",
+                key.to_string()
+            );
+        } else {
+            panic!("not recognized as private key address");
+        }
+    }
+
+    #[test]
+    fn test_desc() {
+        let inp = "pkh(xprv9z1Nt86QQeoGXTjrvKgbFT924JeV1qmo2QV6m8YYTWkaVVWNc3nmeTTKsoq2PKVMfQLUKchQbazkT5FqLo4BUC2P2rVFmDnE46QBNjiAsLP)";
+        let resp = InputEval::evaluate(inp, "", "").unwrap();
+        if let InputNetwork::PrivKey(ref desc) = resp.network {
+            assert_eq!(inp.to_string() + "#smfvl5ay", desc.to_string());
+        } else {
+            panic!("not recognized as miniscript descriptor");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "sanity check")]
+    fn test_desc_invalid() {
+        let inp = "pkh(pkh(xprv9z1Nt86QQeoGXTjrvKgbFT924JeV1qmE46QBNjiAsLP))";
+        InputEval::evaluate(inp, "", "").unwrap();
     }
 
     #[test]
@@ -506,5 +666,19 @@ mod tests {
     fn test_nodeid_empty() {
         let inp = "";
         assert!(!is_node_id(inp));
+    }
+
+    // I didn't want to dox my real card id, as otherwise anybody could withdraw from it.
+    #[test]
+    fn test_lnurlw() {
+        let inp = "lnurlw://api.swiss-bitcoin-pay.ch/card/AbCdEfGhIjKlMnOpQr?p=123456789ABCDEF&c=123456789ABCDEF";
+        let resp = InputEval::evaluate(inp, "", "").unwrap();
+        if let InputNetwork::LnWithdraw(invoice) = resp.network {
+            assert_eq!(inp.replace("lnurlw://", "https://"), invoice);
+        } else {
+            panic!("not recognized as lightning withdrawal");
+        }
+        assert_eq!(resp.satoshis, Some(21000000000));
+        assert_eq!(resp.description, "🇨🇭 Swiss Bitcoin Pay Card");
     }
 }
