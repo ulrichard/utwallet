@@ -21,8 +21,8 @@ use crate::input_eval::PrivateKeys;
 
 use ldk_node::bip39::Mnemonic;
 use ldk_node::bitcoin::{secp256k1::PublicKey, Address, Network, Txid};
-use ldk_node::io::SqliteStore;
-use ldk_node::lightning_invoice::Invoice;
+use ldk_node::io::sqlite_store::SqliteStore;
+use ldk_node::lightning_invoice::Bolt11Invoice;
 use ldk_node::{Builder, /*Event,*/ Node};
 use lnurl::{api::LnUrlResponse, Builder as LnUrlBuilder};
 use rand_core::{OsRng, RngCore};
@@ -114,7 +114,7 @@ impl BdkWallet {
         Ok(invoice.to_string())
     }
 
-    pub fn pay_invoice(invoice: &Invoice, amount: Option<u64>) -> Result<String, String> {
+    pub fn pay_invoice(invoice: &Bolt11Invoice, amount: Option<u64>) -> Result<String, String> {
         let node_m = UTNODE
             .lock()
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
@@ -294,7 +294,7 @@ impl BdkWallet {
 
         println!("building the ldk-node");
         let mut builder = Builder::new();
-        builder.set_network(Network::Bitcoin);
+        builder.set_network(ldk_node::Network::Bitcoin);
         builder.set_esplora_server(ESPLORA_SERVERS[1].to_string());
         builder.set_entropy_bip39_mnemonic(mnemonic, None);
         builder.set_storage_dir_path(ldk_dir.to_str().unwrap().to_string());
@@ -390,7 +390,7 @@ mod tests {
                         Self::get_available_port(),
                     );
                     let mut builder = Builder::new();
-                    builder.set_network(Network::Regtest);
+                    builder.set_network(ldk_node::Network::Regtest);
                     builder.set_esplora_server(electrsd.esplora_url.clone().unwrap());
                     let node = builder.build().unwrap();
                     node.start().unwrap();

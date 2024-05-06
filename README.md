@@ -13,7 +13,7 @@ The "Address or invoice" field is more versatile than it appears at first sight.
 * a Bitcoin address, can be legacy or Beech32
 * a BOLT11 lightning invoice
 * a BTC URL that contains an amount, such as: "bitcoin:bc1qa8dn66xn2yq4fcaee4f0gwkkr6e6em643cm8fa?label=test&amount=100"
-* a private key or sweeping. Can be either WIF, XPRV or a miniscript descriptor
+* a private key for sweeping. Can be either WIF, XPRV or a miniscript descriptor
 * an LNURL for paying
 * an LNURLW for withdrawing
 * a lightning address that looks like an eMail address

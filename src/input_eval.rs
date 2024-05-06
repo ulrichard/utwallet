@@ -14,11 +14,11 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-use ldk_node::lightning_invoice::{Invoice, InvoiceDescription, SignedRawInvoice};
-use ldk_node::{
-    bitcoin::{secp256k1::PublicKey, util::bip32::ExtendedPrivKey, Address, PrivateKey},
-    NetAddress,
+use ldk_node::bitcoin::{
+    bip32::ExtendedPrivKey, secp256k1::PublicKey, Address, Network, PrivateKey,
 };
+use ldk_node::lightning::ln::msgs::SocketAddress;
+use ldk_node::lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription};
 use libelectrum2descriptors::ElectrumExtendedPrivKey;
 use lnurl::{api::LnUrlResponse, lightning_address::LightningAddress, lnurl::LnUrl, Builder};
 use miniscript::Descriptor;
@@ -49,7 +49,7 @@ impl PrivateKeys {
 
 pub enum InputNetwork {
     Mainnet(Address),
-    Lightning(Invoice),
+    Lightning(Bolt11Invoice),
     PrivKey(PrivateKeys),
     LnWithdraw(String),
 }
@@ -145,7 +145,7 @@ impl InputEval {
             let recipient = recipient
                 .replace("LIGHTNING:", "")
                 .replace("lightning:", "");
-            let invoice = str::parse::<Invoice>(&recipient).map_err(|e| e.to_string())?;
+            let invoice = str::parse::<Bolt11Invoice>(&recipient).map_err(|e| e.to_string())?;
             let satoshis = if let Some(msat) = invoice.amount_milli_satoshis() {
                 Some(msat / 1_000)
             } else {
@@ -201,6 +201,12 @@ impl InputEval {
     fn mainnet(addr: &str, satoshis: Option<u64>, description: String) -> Result<Self, String> {
         let addr = Address::from_str(addr)
             .map_err(|e| format!("Failed to parse address {} : {}", addr, e))?;
+        let addr = addr.require_network(Network::Bitcoin).map_err(|e| {
+            format!(
+                "The onchain address doesn't look like it is for mainnet: {}",
+                e
+            )
+        })?;
         Ok(Self {
             network: InputNetwork::Mainnet(addr),
             satoshis,
@@ -213,18 +219,15 @@ impl InputEval {
         satoshis: Option<u64>,
         description: String,
     ) -> Result<Self, String> {
-        let signed = invoice
-            .parse::<SignedRawInvoice>()
-            .map_err(|e| format!("Failed to parse the invoice {} : {}", invoice, e))?;
-        let invoice = Invoice::from_signed(signed)
+        let invoice = Bolt11Invoice::from_str(invoice)
             .map_err(|e| format!("Failed to construct the invoice {} : {}", invoice, e))?;
         let satoshis = if let Some(msats) = invoice.amount_milli_satoshis() {
             Some(msats / 1_000)
         } else {
             satoshis
         };
-        let description = if let InvoiceDescription::Direct(desc) = invoice.description() {
-            desc.clone().into_inner()
+        let description = if let Bolt11InvoiceDescription::Direct(desc) = invoice.description() {
+            desc.clone().into_inner().to_string()
         } else {
             description
         };
@@ -257,7 +260,9 @@ impl InputEval {
                 } else {
                     pay.min_sendable
                 };
-                let resp = client.get_invoice(&pay, msats).map_err(|e| e.to_string())?;
+                let resp = client
+                    .get_invoice(&pay, msats, None, Some(&description))
+                    .map_err(|e| e.to_string())?;
                 let invoice = resp.invoice();
                 Self::lightning(&invoice.to_string(), Some(msats / 1_000), description)
             }
@@ -327,7 +332,7 @@ pub fn is_node_id(input: &str) -> bool {
     if PublicKey::from_str(id_addr[0]).is_err() {
         return false;
     }
-    if NetAddress::from_str(id_addr[1]).is_err() {
+    if SocketAddress::from_str(id_addr[1]).is_err() {
         return false;
     }
 
