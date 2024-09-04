@@ -21,7 +21,6 @@ use crate::input_eval::PrivateKeys;
 
 use ldk_node::bip39::Mnemonic;
 use ldk_node::bitcoin::{secp256k1::PublicKey, Address, Network, Txid};
-use ldk_node::io::sqlite_store::SqliteStore;
 use ldk_node::lightning_invoice::Bolt11Invoice;
 use ldk_node::{Builder, /*Event,*/ Node};
 use lnurl::{api::LnUrlResponse, Builder as LnUrlBuilder};
@@ -38,7 +37,7 @@ use std::{
 
 pub struct BdkWallet {}
 
-static UTNODE: Mutex<Option<Node<SqliteStore>>> = Mutex::new(None);
+static UTNODE: Mutex<Option<Node>> = Mutex::new(None);
 
 /// A facade for bdk::Wallet with a singleton instance
 impl BdkWallet {
@@ -58,7 +57,8 @@ impl BdkWallet {
         //}
 
         let txid = node
-            .send_to_onchain_address(&recipient, amount)
+            .onchain_payment()
+            .send_to_address(&recipient, amount)
             .map_err(|e| format!("Failed to send on-chain: {:?}", e))?;
 
         println!("on-chain payment sent: {}", txid);
@@ -90,7 +90,7 @@ impl BdkWallet {
 
         let channels = node.list_channels();
         for c in channels {
-            node.close_channel(&c.channel_id, c.counterparty_node_id)
+            node.close_channel(&c.user_channel_id, c.counterparty_node_id)
                 .map_err(|e| format!("Failed to close a channel: {:?}", e))?;
         }
 
@@ -105,9 +105,11 @@ impl BdkWallet {
 
         let expiry_secs = 60 * 15;
         let invoice = if let Some(amount) = amount {
-            node.receive_payment(amount * 1_000, desc, expiry_secs)
+            node.bolt11_payment()
+                .receive(amount * 1_000, desc, expiry_secs)
         } else {
-            node.receive_variable_amount_payment(desc, expiry_secs)
+            node.bolt11_payment()
+                .receive_variable_amount(desc, expiry_secs)
         }
         .map_err(|e| format!("Failed to create an invoice: {:?}", e))?;
 
@@ -122,7 +124,8 @@ impl BdkWallet {
 
         let ph = match (invoice.amount_milli_satoshis(), amount) {
             (Some(_amount), None) => node
-                .send_payment(invoice)
+                .bolt11_payment()
+                .send(invoice)
                 .map_err(|e| format!("Unable to pay the invoice: {:?}", e)),
             (Some(amount_inv), Some(amount_field)) => {
                 if (amount_inv as i64 - amount_field as i64 * 1_000).abs() > 1_000_000 {
@@ -132,12 +135,14 @@ impl BdkWallet {
                         amount_field * 1_000
                     ))
                 } else {
-                    node.send_payment(invoice)
+                    node.bolt11_payment()
+                        .send(invoice)
                         .map_err(|e| format!("Unable to pay the invoice: {:?}", e))
                 }
             }
             (None, Some(amount)) => node
-                .send_payment_using_amount(invoice, amount * 1_000)
+                .bolt11_payment()
+                .send_using_amount(invoice, amount * 1_000)
                 .map_err(|e| format!("Unable to pay the invoice with {} sats: {:?}", amount, e)),
             (None, None) => Err("No amount to pay the invoice!".to_string()),
         }?;
@@ -238,7 +243,8 @@ impl BdkWallet {
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
 
-        node.new_onchain_address()
+        node.onchain_payment()
+            .new_address()
             .map_err(|e| format!("Unable to get an address: {:?}", e))
     }
 
@@ -248,19 +254,10 @@ impl BdkWallet {
             .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
         let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
 
-        println!("getting on-chain balance");
-        let ocbal = node
-            .spendable_onchain_balance_sats()
-            .map_err(|e| format!("Unable to get on-chain balance: {:?}", e))?;
+        println!("getting balances");
+        let ocbal = node.list_balances().spendable_onchain_balance_sats;
 
-        println!("on-chain balance: {}", ocbal);
-
-        let channels = node.list_channels();
-        println!("channels: {:?}", channels);
-        let lnbal = channels
-            .iter()
-            .fold(0, |sum, c| sum + c.outbound_capacity_msat)
-            / 1_000;
+        let lnbal = node.list_balances().total_lightning_balance_sats;
 
         Ok((ocbal as f32 / 100_000_000.0, lnbal as f32 / 100_000_000.0))
     }
@@ -285,7 +282,7 @@ impl BdkWallet {
         }
     }
 
-    fn create_node() -> Result<Node<SqliteStore>, String> {
+    fn create_node() -> Result<Node, String> {
         let app_data_path =
             unsafe { QStandardPaths::writable_location(StandardLocation::AppDataLocation) };
         let mnemonic_file = PathBuf::from(app_data_path.to_std_string()).join("mnemonic.txt");
@@ -294,7 +291,7 @@ impl BdkWallet {
 
         println!("building the ldk-node");
         let mut builder = Builder::new();
-        builder.set_network(ldk_node::Network::Bitcoin);
+        builder.set_network(Network::Bitcoin);
         builder.set_esplora_server(ESPLORA_SERVERS[1].to_string());
         builder.set_entropy_bip39_mnemonic(mnemonic, None);
         builder.set_storage_dir_path(ldk_dir.to_str().unwrap().to_string());
@@ -364,7 +361,7 @@ mod tests {
         /// Instance of the electrs electrum server
         electrsd: ElectrsD,
         /// ldk-node instances
-        ldk_nodes: Vec<Node<SqliteStore>>,
+        ldk_nodes: Vec<Node>,
     }
 
     impl RegTestEnv {
@@ -390,7 +387,7 @@ mod tests {
                         Self::get_available_port(),
                     );
                     let mut builder = Builder::new();
-                    builder.set_network(ldk_node::Network::Regtest);
+                    builder.set_network(Network::Regtest);
                     builder.set_esplora_server(electrsd.esplora_url.clone().unwrap());
                     let node = builder.build().unwrap();
                     node.start().unwrap();
@@ -414,7 +411,7 @@ mod tests {
                 .zip(self.ldk_nodes.iter())
                 .enumerate()
                 .for_each(|(i, (num_blocks, node))| {
-                    let addr = node.new_onchain_address().unwrap();
+                    let addr = node.onchain_payment().new_address().unwrap();
                     println!("{} Generating {} blocks to {}", i, num_blocks, addr);
                     self.generate_to_address(*num_blocks, &addr);
                 });
@@ -424,7 +421,8 @@ mod tests {
                 .ldk_nodes
                 .last()
                 .unwrap()
-                .new_onchain_address()
+                .onchain_payment()
+                .new_address()
                 .unwrap();
             println!("Generating {} blocks to {}", 100, addr);
             self.generate_to_address(100, &addr);
@@ -448,13 +446,13 @@ mod tests {
 
                     // checking the on-chain balance of the nodes
                     (0..5).find(|_| {
-                        let bal = node.spendable_onchain_balance_sats().unwrap();
+                        let bal = node.list_balances().spendable_onchain_balance_sats;
                         if bal == 0 {
                             sleep(Duration::from_secs(1));
                         }
                         bal > 0
                     });
-                    let bal = node.spendable_onchain_balance_sats().unwrap();
+                    let bal = node.list_balances().spendable_onchain_balance_sats;
                     println!("{:?}", bal);
                     let expected = *num_blocks as u64 * 5_000_000_000;
                     assert_eq!(bal, expected, "node {} has a balance of {}", i, bal);
@@ -469,7 +467,7 @@ mod tests {
                 let n2 = &self.ldk_nodes[*n2];
                 n1.connect_open_channel(
                     n2.node_id(),
-                    n2.listening_address().unwrap().clone(),
+                    n2.listening_addresses().unwrap()[0].clone(),
                     sats * 1_000,
                     None,
                     None,
@@ -482,7 +480,8 @@ mod tests {
                 //println!("ldk event: {:?}", event);
                 //node.event_handled();
 
-                self.generate_to_address(3, &n1.new_onchain_address().unwrap());
+                let addr1 = n1.onchain_payment().new_address().unwrap();
+                self.generate_to_address(3, &addr1);
                 let channels = n1.list_channels();
                 let chan = channels.last().unwrap();
                 println!("new channel: {:?}", chan);

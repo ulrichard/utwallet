@@ -18,6 +18,7 @@ use ldk_node::bitcoin::{
     bip32::ExtendedPrivKey, secp256k1::PublicKey, Address, Network, PrivateKey,
 };
 use ldk_node::lightning::ln::msgs::SocketAddress;
+use ldk_node::lightning::offers::offer::{Amount, Offer};
 use ldk_node::lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription};
 use libelectrum2descriptors::ElectrumExtendedPrivKey;
 use lnurl::{api::LnUrlResponse, lightning_address::LightningAddress, lnurl::LnUrl, Builder};
@@ -50,6 +51,7 @@ impl PrivateKeys {
 pub enum InputNetwork {
     Mainnet(Address),
     Lightning(Bolt11Invoice),
+    // LightningOffer(Offer),
     PrivKey(PrivateKeys),
     LnWithdraw(String),
 }
@@ -158,7 +160,16 @@ impl InputEval {
         let rgx_bolt12 = r#"^lno1[a-z0-9]{55,150}$"#;
         let re = Regex::new(&rgx_bolt12).map_err(|e| e.to_string())?;
         if re.is_match(recipient) {
-            return Err("BOLT12 is not supported yet".to_string());
+            let offer = str::parse::<Offer>(&recipient)
+                .map_err(|e| format!("Failed to parse BOLT12 offer: {:?}", e))?;
+            let satoshis = match offer.amount() {
+                Some(Amount::Bitcoin { amount_msats }) => Some(amount_msats / 1_000),
+                Some(Amount::Currency { .. }) => {
+                    return Err("For BOLT12 we only support BTC at the moment".to_string());
+                }
+                None => satoshis,
+            };
+            return Self::lightning_offer(&recipient, satoshis, descr);
         }
 
         // LNURL https://github.com/lnurl/luds
@@ -236,6 +247,35 @@ impl InputEval {
             satoshis,
             description,
         })
+    }
+
+    fn lightning_offer(
+        offer: &str,
+        satoshis: Option<u64>,
+        description: String,
+    ) -> Result<Self, String> {
+        let offer = str::parse::<Offer>(&offer)
+            .map_err(|e| format!("Failed to parse BOLT12 offer: {:?}", e))?;
+        // let invoice = offer.request_invoice(metadata, payer_id);
+
+        /*
+                let satoshis = if let Some(msats) = invoice.amount_milli_satoshis() {
+                    Some(msats / 1_000)
+                } else {
+                    satoshis
+                };
+                let description = if let Bolt11InvoiceDescription::Direct(desc) = invoice.description() {
+                    desc.clone().into_inner().to_string()
+                } else {
+                    description
+                };
+                Ok(Self {
+                    network: InputNetwork::Lightning(invoice),
+                    satoshis,
+                    description,
+                })
+        */
+        Err("ToDo".to_string())
     }
 
     fn ln_url(url: &str, satoshis: Option<u64>, description: String) -> Result<Self, String> {
@@ -502,7 +542,7 @@ mod tests {
         }
         assert_eq!(resp.satoshis, None);
         assert_eq!(resp.description, "⚡");
-        assert_eq!(resp.gui_csv().unwrap(), "lnbc1pjzg3y4sp5t5pqc4w2re6duurq9smwhd78688rwmg2hwxhypxn0vqgu9vgjxnspp5z7p6kn5fpnr8zefvhdw90gascnae5a9s2flrwjp45a6tf53gwrrqdq9u2d2zxqr3jscqpjrzjqvp62xyytkuen9rc8asxue3fuuzultc89ewwnfxch70zf80yl0gpjzxypyqqxhqqqqqqqqqqqqqqqzqq9q9qx3qysgqcnwt6hdzlz3r5k3vqlwcyjrgmyyxrcq7rv304w32q8s6zqe4r7vjvvqxq8rk0g8j9udljtr9dw908ye7608z945gpa3h0avudrqtcpsp7zd4mp;0;⚡");
+        assert_eq!(resp.gui_csv().unwrap(), "lnbc1pjzg3y4sp5t5pqc4w2re6duurq9smwhd78688rwmg2hwxhypxn0vqgu9vgjxnspp5z7p6kn5fpnr8zefvhdw90gascnae5a9s2flrwjp45a6tf53gwrrqdq9u2d2zxqr3jscqpjrzjqvp62xyytkuen9rc8asxue3fuuzultc89ewwnfxch70zf80yl0gpjzxypyqqxhqqqqqqqqqqqqqqqzqq9q9qx3qysgqcnwt6hdzlz3r5k3vqlwcyjrgmyyxrcq7rv304w32q8s6zqe4r7vjvvqxq8rk0g8j9udljtr9dw908ye7608z945gpa3h0avudrqtcpsp7zd4mp;;⚡");
     }
 
     #[test]

@@ -18,5 +18,6 @@ The "Address or invoice" field is more versatile than it appears at first sight.
 * an LNURLW for withdrawing
 * a lightning address that looks like an eMail address
 * a lightning node id for opening a channel
+* soon to come: BOLT12 offers and taproot addresses
 
 So far, I did not integrate a qr scanner into the app. But if you have utlnwallet opened, tagger can automatically send the information over. If it is not already running, it will also start the app, but in this case, the data transfer doesn't work yet.

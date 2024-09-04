@@ -99,7 +99,7 @@ impl Sweeper {
 mod tests {
     use super::*;
     use bdk::wallet::AddressIndex::New;
-    use ldk_node::bitcoin::{util::bip32::ExtendedPrivKey, PrivateKey};
+    use ldk_node::bitcoin::{bip32::ExtendedPrivKey, PrivateKey};
     use miniscript::Descriptor;
     use rstest::rstest;
     use std::str::FromStr;
