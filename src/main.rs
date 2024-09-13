@@ -205,6 +205,7 @@ impl Greeter {
                 }
             }
             InputNetwork::Lightning(invoice) => BdkWallet::pay_invoice(&invoice, satoshis)?,
+            InputNetwork::LightningOffer(offer) => BdkWallet::pay_offer(&offer, satoshis, desc)?,
             InputNetwork::LnWithdraw(lnurlw) => BdkWallet::withdraw(&lnurlw, satoshis)?,
             InputNetwork::PrivKey(privkeys) => BdkWallet::sweep(&privkeys)?,
         };

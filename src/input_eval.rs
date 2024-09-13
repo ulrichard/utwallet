@@ -51,7 +51,7 @@ impl PrivateKeys {
 pub enum InputNetwork {
     Mainnet(Address),
     Lightning(Bolt11Invoice),
-    // LightningOffer(Offer),
+    LightningOffer(Offer),
     PrivKey(PrivateKeys),
     LnWithdraw(String),
 }
@@ -256,26 +256,26 @@ impl InputEval {
     ) -> Result<Self, String> {
         let offer = str::parse::<Offer>(&offer)
             .map_err(|e| format!("Failed to parse BOLT12 offer: {:?}", e))?;
-        // let invoice = offer.request_invoice(metadata, payer_id);
 
-        /*
-                let satoshis = if let Some(msats) = invoice.amount_milli_satoshis() {
-                    Some(msats / 1_000)
-                } else {
-                    satoshis
-                };
-                let description = if let Bolt11InvoiceDescription::Direct(desc) = invoice.description() {
-                    desc.clone().into_inner().to_string()
-                } else {
-                    description
-                };
-                Ok(Self {
-                    network: InputNetwork::Lightning(invoice),
-                    satoshis,
-                    description,
-                })
-        */
-        Err("ToDo".to_string())
+        let satoshis = match offer.amount() {
+            Some(Amount::Bitcoin { amount_msats }) => Some(amount_msats / 1_000),
+            Some(Amount::Currency { .. }) => {
+                return Err("For BOLT12 we only support BTC at the moment".to_string());
+            }
+            None => satoshis,
+        };
+
+        let description = if let Some(desc) = offer.description() {
+            format!("{}", desc)
+        } else {
+            description
+        };
+
+        Ok(Self {
+            network: InputNetwork::LightningOffer(offer),
+            satoshis,
+            description,
+        })
     }
 
     fn ln_url(url: &str, satoshis: Option<u64>, description: String) -> Result<Self, String> {
@@ -342,6 +342,7 @@ impl InputEval {
         let recipient = match &self.network {
             InputNetwork::Mainnet(addr) => addr.to_string(),
             InputNetwork::Lightning(invoice) => invoice.to_string(),
+            InputNetwork::LightningOffer(offer) => offer.to_string(),
             InputNetwork::LnWithdraw(ss) => ss.to_string(),
             InputNetwork::PrivKey(ss) => ss.to_string(),
         };
@@ -588,24 +589,32 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "BOLT12 is not supported yet")]
     fn test_bolt12_short() {
         let inp = "lno1pgqpvggr53478rgx3s4uttelcy76ssrepm2kg0ead5n7tc6dvlkj4mqkeens";
         let resp = InputEval::evaluate(inp, "", "").unwrap();
-        if let InputNetwork::Lightning(invoice) = resp.network {
-            assert_eq!(inp, invoice.to_string());
+        if let InputNetwork::LightningOffer(offer) = resp.network {
+            assert_eq!(inp, offer.to_string());
+            assert_eq!(offer.amount(), None);
+            assert_eq!(offer.description().unwrap().to_string(), "");
         } else {
             panic!("not recognized as lightning invoice");
         }
     }
 
     #[test]
-    #[should_panic(expected = "BOLT12 is not supported yet")]
     fn test_bolt12_long() {
         let inp = "lno1pqpzwrc2936x2um5yp6x2um5yp6x2um5yp6x2um5yp6x2um5yp6x2um5yp6x2um5yp6x2um5yp6x2um5zcss8frtuwxsdrptckhnlsfa4pq8jrk4vsln6mf8uh356eld9tkpdnn8";
         let resp = InputEval::evaluate(inp, "", "").unwrap();
-        if let InputNetwork::Lightning(invoice) = resp.network {
-            assert_eq!(inp, invoice.to_string());
+        if let InputNetwork::LightningOffer(offer) = resp.network {
+            assert_eq!(inp, offer.to_string());
+            assert_eq!(
+                offer.amount(),
+                Some(Amount::Bitcoin { amount_msats: 9999 }).as_ref()
+            );
+            assert_eq!(
+                offer.description().unwrap().to_string(),
+                "test test test test test test test test test"
+            );
         } else {
             panic!("not recognized as lightning invoice");
         }

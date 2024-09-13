@@ -21,6 +21,7 @@ use crate::input_eval::PrivateKeys;
 
 use ldk_node::bip39::Mnemonic;
 use ldk_node::bitcoin::{secp256k1::PublicKey, Address, Network, Txid};
+use ldk_node::lightning::offers::offer::{Amount, Offer};
 use ldk_node::lightning_invoice::Bolt11Invoice;
 use ldk_node::{Builder, /*Event,*/ Node};
 use lnurl::{api::LnUrlResponse, Builder as LnUrlBuilder};
@@ -143,6 +144,57 @@ impl BdkWallet {
             (None, Some(amount)) => node
                 .bolt11_payment()
                 .send_using_amount(invoice, amount * 1_000)
+                .map_err(|e| format!("Unable to pay the invoice with {} sats: {:?}", amount, e)),
+            (None, None) => Err("No amount to pay the invoice!".to_string()),
+        }?;
+
+        let ph = format!("{:?}", ph);
+        println!("lightning payment sent: {}", ph);
+
+        Ok(ph)
+    }
+
+    pub fn pay_offer(offer: &Offer, amount: Option<u64>, desc: &str) -> Result<String, String> {
+        let node_m = UTNODE
+            .lock()
+            .map_err(|e| format!("Unable to get the mutex for the wallet: {:?}", e))?;
+        let node = node_m.as_ref().ok_or("The wallet was not initialized")?;
+
+        let msats_min = match offer.amount() {
+            Some(Amount::Bitcoin { amount_msats }) => Some(amount_msats),
+            Some(Amount::Currency { .. }) => {
+                return Err("For BOLT12 we only support BTC at the moment".to_string());
+            }
+            None => None,
+        };
+
+        let desc = if desc.is_empty() {
+            None
+        } else {
+            Some(desc.to_string())
+        };
+
+        let ph = match (msats_min, amount) {
+            (Some(_amount), None) => node
+                .bolt12_payment()
+                .send(offer, desc)
+                .map_err(|e| format!("Unable to pay the invoice: {:?}", e)),
+            (Some(amount_inv), Some(amount_field)) => {
+                if (*amount_inv as i64 - amount_field as i64 * 1_000).abs() > 1_000_000 {
+                    Err(format!(
+                        "amount of the invoice {} and in the field {} don't match",
+                        amount_inv,
+                        amount_field * 1_000
+                    ))
+                } else {
+                    node.bolt12_payment()
+                        .send(offer, desc)
+                        .map_err(|e| format!("Unable to pay the invoice: {:?}", e))
+                }
+            }
+            (None, Some(amount)) => node
+                .bolt12_payment()
+                .send_using_amount(offer, desc, amount * 1_000)
                 .map_err(|e| format!("Unable to pay the invoice with {} sats: {:?}", amount, e)),
             (None, None) => Err("No amount to pay the invoice!".to_string()),
         }?;
