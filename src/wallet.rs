@@ -77,7 +77,7 @@ impl BdkWallet {
         assert_eq!(id_addr.len(), 2);
         let node_id = PublicKey::from_str(id_addr[0]).unwrap();
         let node_addr = id_addr[1].parse().unwrap();
-        node.connect_open_channel(node_id, node_addr, amount, None, None, false)
+        node.open_channel(node_id, node_addr, amount, None, None)
             .map_err(|e| format!("Failed to open a channel: {:?}", e))?;
 
         Ok(())
@@ -126,7 +126,7 @@ impl BdkWallet {
         let ph = match (invoice.amount_milli_satoshis(), amount) {
             (Some(_amount), None) => node
                 .bolt11_payment()
-                .send(invoice)
+                .send(invoice, None)
                 .map_err(|e| format!("Unable to pay the invoice: {:?}", e)),
             (Some(amount_inv), Some(amount_field)) => {
                 if (amount_inv as i64 - amount_field as i64 * 1_000).abs() > 1_000_000 {
@@ -137,13 +137,13 @@ impl BdkWallet {
                     ))
                 } else {
                     node.bolt11_payment()
-                        .send(invoice)
+                        .send(invoice, None)
                         .map_err(|e| format!("Unable to pay the invoice: {:?}", e))
                 }
             }
             (None, Some(amount)) => node
                 .bolt11_payment()
-                .send_using_amount(invoice, amount * 1_000)
+                .send_using_amount(invoice, amount * 1_000, None)
                 .map_err(|e| format!("Unable to pay the invoice with {} sats: {:?}", amount, e)),
             (None, None) => Err("No amount to pay the invoice!".to_string()),
         }?;
@@ -177,10 +177,10 @@ impl BdkWallet {
         let ph = match (msats_min, amount) {
             (Some(_amount), None) => node
                 .bolt12_payment()
-                .send(offer, desc)
+                .send(offer, None, desc)
                 .map_err(|e| format!("Unable to pay the invoice: {:?}", e)),
             (Some(amount_inv), Some(amount_field)) => {
-                if (*amount_inv as i64 - amount_field as i64 * 1_000).abs() > 1_000_000 {
+                if (amount_inv as i64 - amount_field as i64 * 1_000).abs() > 1_000_000 {
                     Err(format!(
                         "amount of the invoice {} and in the field {} don't match",
                         amount_inv,
@@ -188,13 +188,13 @@ impl BdkWallet {
                     ))
                 } else {
                     node.bolt12_payment()
-                        .send(offer, desc)
+                        .send(offer, None, desc)
                         .map_err(|e| format!("Unable to pay the invoice: {:?}", e))
                 }
             }
             (None, Some(amount)) => node
                 .bolt12_payment()
-                .send_using_amount(offer, desc, amount * 1_000)
+                .send_using_amount(offer, amount * 1_000, None, desc)
                 .map_err(|e| format!("Unable to pay the invoice with {} sats: {:?}", amount, e)),
             (None, None) => Err("No amount to pay the invoice!".to_string()),
         }?;
@@ -344,7 +344,7 @@ impl BdkWallet {
         println!("building the ldk-node");
         let mut builder = Builder::new();
         builder.set_network(Network::Bitcoin);
-        builder.set_esplora_server(ESPLORA_SERVERS[1].to_string());
+        builder.set_chain_source_esplora(ESPLORA_SERVERS[1].to_string(), None);
         builder.set_entropy_bip39_mnemonic(mnemonic, None);
         builder.set_storage_dir_path(ldk_dir.to_str().unwrap().to_string());
         builder.set_gossip_source_rgs(RAPID_GOSSIP_SYNC_URL.to_string());
@@ -440,7 +440,7 @@ mod tests {
                     );
                     let mut builder = Builder::new();
                     builder.set_network(Network::Regtest);
-                    builder.set_esplora_server(electrsd.esplora_url.clone().unwrap());
+                    builder.set_chain_source_esplora(electrsd.esplora_url.clone().unwrap(), None);
                     let node = builder.build().unwrap();
                     node.start().unwrap();
                     println!("{:?} starting at {:?}", i, listen);
@@ -517,13 +517,12 @@ mod tests {
             channels.iter().for_each(|(n1, n2, sats)| {
                 let n1 = &self.ldk_nodes[*n1];
                 let n2 = &self.ldk_nodes[*n2];
-                n1.connect_open_channel(
+                n1.open_channel(
                     n2.node_id(),
                     n2.listening_addresses().unwrap()[0].clone(),
                     sats * 1_000,
                     None,
                     None,
-                    true,
                 )
                 .unwrap();
 

@@ -1,10 +1,10 @@
 use crate::input_eval::PrivateKeys;
-use bdk::{
-    bitcoin::{Address, Network},
-    blockchain::EsploraBlockchain,
-    database::MemoryDatabase,
-    SignOptions, SyncOptions, Wallet,
-};
+//use bdk::{
+//    blockchain::EsploraBlockchain, database::MemoryDatabase, SignOptions, SyncOptions, Wallet,
+//};
+use bdk_esplora::{esplora_client, EsploraAsyncExt};
+use bdk_wallet::{KeychainKind, SignOptions, Wallet};
+use ldk_node::bitcoin::{Address, Network};
 
 pub struct Sweeper {
     pub esplora_url: String,
@@ -38,42 +38,62 @@ impl Sweeper {
     }
 
     async fn sweep_one(&self, desc: &str, destination: &Address) -> Result<Option<String>, String> {
-        let wallet = Wallet::new(desc, None, self.network, MemoryDatabase::default())
+        let mut wallet = Wallet::create_single(desc.to_string())
+            .network(self.network)
+            .create_wallet_no_persist()
             .map_err(|e| format!("Failed to construct sweep wallet: {}", e))?;
-        let blockchain = EsploraBlockchain::new(&self.esplora_url, 20);
+        let client = esplora_client::Builder::new(&self.esplora_url)
+            .build_async()
+            .map_err(|e| format!("Failed to synchronize sweep wallet: {}", e))?;
+        Self::sync_wallet(&mut wallet, &client)
+            .await
+            .map_err(|e| format!("Failed to synchronize sweep wallet: {}", e))?;
+
+        let bal = wallet.balance();
+        if bal.total().to_sat() <= 0 {
+            return Ok(None);
+        }
+        println!("sweeping {} to {}", bal, destination.to_string());
+        let mut builder = wallet.build_tx();
+        builder.drain_wallet().drain_to(destination.script_pubkey());
+        let mut psbt = builder
+            .finish()
+            .map_err(|e| format!("Failed to construct sweep transaction: {}", e))?;
+
+        let signopt = SignOptions {
+            ..Default::default()
+        };
         wallet
-            .sync(&blockchain, SyncOptions::default())
+            .sign(&mut psbt, signopt)
+            .map_err(|e| format!("Failed to sign sweep transaction: {}", e))?;
+
+        let tx = psbt
+            .extract_tx()
+            .map_err(|e| format!("Failed to extract sweep transaction: {}", e))?;
+        client
+            .broadcast(&tx)
+            .await
+            .map_err(|e| format!("Failed to broadcast sweep transaction: {}", e))?;
+        Ok(Some(format!("swept {}", bal.total())))
+    }
+
+    async fn sync_wallet(
+        wallet: &mut Wallet,
+        client: &esplora_client::AsyncClient,
+    ) -> Result<(), String> {
+        const STOP_GAP: usize = 10;
+        const BATCH_SIZE: usize = 5;
+
+        let full_scan_request = wallet.start_full_scan();
+        let update = client
+            .full_scan(full_scan_request, STOP_GAP, BATCH_SIZE)
             .await
             .map_err(|e| format!("Failed to sync sweep wallet: {}", e))?;
+        wallet
+            .apply_update(update)
+            .map_err(|e| format!("Failed to sync sweep wallet: {}", e))?;
 
-        if let Ok(bal) = wallet.get_balance() {
-            if bal.get_total() <= 0 {
-                return Ok(None);
-            }
-            println!("sweeping {} to {}", bal, destination.to_string());
-            let mut builder = wallet.build_tx();
-            builder
-                .drain_wallet()
-                .drain_to(destination.script_pubkey())
-                .enable_rbf();
-            let (mut psbt, _) = builder
-                .finish()
-                .map_err(|e| format!("Failed to construct sweep transaction: {}", e))?;
-            let signopt = SignOptions {
-                ..Default::default()
-            };
-            wallet
-                .sign(&mut psbt, signopt)
-                .map_err(|e| format!("Failed to sign sweep transaction: {}", e))?;
-            let tx = psbt.extract_tx();
-            blockchain
-                .broadcast(&tx)
-                .await
-                .map_err(|e| format!("Failed to broadcast sweep transaction: {}", e))?;
-            Ok(Some(format!("swept {}", bal.get_total())))
-        } else {
-            Ok(None)
-        }
+        Ok(())
     }
 
     fn descriptors(privkeys: &PrivateKeys) -> Result<Vec<String>, String> {
@@ -98,8 +118,7 @@ impl Sweeper {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bdk::wallet::AddressIndex::New;
-    use ldk_node::bitcoin::{bip32::ExtendedPrivKey, PrivateKey};
+    use ldk_node::bitcoin::{bip32::Xpriv, PrivateKey};
     use miniscript::Descriptor;
     use rstest::rstest;
     use std::str::FromStr;
@@ -109,7 +128,7 @@ mod tests {
             return PrivateKeys::Pk(pk);
         }
 
-        let xprv = ExtendedPrivKey::from_str(inp).unwrap();
+        let xprv = Xpriv::from_str(inp).unwrap();
         PrivateKeys::Epk(xprv)
     }
 
@@ -128,22 +147,50 @@ mod tests {
         let pk = parse_priv(pk);
         let desc = Sweeper::descriptors(&pk).unwrap();
         assert_eq!(desc.len(), 4);
-        let w1 = Wallet::new(&desc[0], None, Network::Bitcoin, MemoryDatabase::default())
+        let w1 = Wallet::create_single(desc[0].to_string())
+            .network(Network::Bitcoin)
+            .create_wallet_no_persist()
             .map_err(|e| format!("{} - {}", desc[0], e))
             .unwrap();
-        assert_eq!(w1.get_address(New).unwrap().to_string(), addrs[0]);
-        let w2 = Wallet::new(&desc[1], None, Network::Bitcoin, MemoryDatabase::default())
+        assert_eq!(
+            w1.peek_address(KeychainKind::External, 0)
+                .address
+                .to_string(),
+            addrs[0]
+        );
+        let w2 = Wallet::create_single(desc[1].to_string())
+            .network(Network::Bitcoin)
+            .create_wallet_no_persist()
             .map_err(|e| format!("{} - {}", desc[1], e))
             .unwrap();
-        assert_eq!(w2.get_address(New).unwrap().to_string(), addrs[1]);
-        let w3 = Wallet::new(&desc[2], None, Network::Bitcoin, MemoryDatabase::default())
+        assert_eq!(
+            w2.peek_address(KeychainKind::External, 0)
+                .address
+                .to_string(),
+            addrs[1]
+        );
+        let w3 = Wallet::create_single(desc[2].to_string())
+            .network(Network::Bitcoin)
+            .create_wallet_no_persist()
             .map_err(|e| format!("{} - {}", desc[2], e))
             .unwrap();
-        assert_eq!(w3.get_address(New).unwrap().to_string(), addrs[2]);
-        let w4 = Wallet::new(&desc[3], None, Network::Bitcoin, MemoryDatabase::default())
+        assert_eq!(
+            w3.peek_address(KeychainKind::External, 0)
+                .address
+                .to_string(),
+            addrs[2]
+        );
+        let w4 = Wallet::create_single(desc[3].to_string())
+            .network(Network::Bitcoin)
+            .create_wallet_no_persist()
             .map_err(|e| format!("{} - {}", desc[3], e))
             .unwrap();
-        assert_eq!(w4.get_address(New).unwrap().to_string(), addrs[3]);
+        assert_eq!(
+            w4.peek_address(KeychainKind::External, 0)
+                .address
+                .to_string(),
+            addrs[3]
+        );
     }
 
     #[test]
@@ -152,11 +199,15 @@ mod tests {
         let desc = Descriptor::<String>::from_str(inp).unwrap();
         let desc = Sweeper::descriptors(&PrivateKeys::Desc(desc)).unwrap();
         assert_eq!(desc.len(), 1);
-        let w1 = Wallet::new(&desc[0], None, Network::Bitcoin, MemoryDatabase::default())
+        let w1 = Wallet::create_single(&desc[0])
+            .network(Network::Bitcoin)
+            .create_wallet_no_persist()
             .map_err(|e| format!("{} - {}", desc[0], e))
             .unwrap();
         assert_eq!(
-            w1.get_address(New).unwrap().to_string(),
+            w1.peek_address(KeychainKind::External, 0)
+                .address
+                .to_string(),
             "182vUeQLsdKqkPt5CWsV7Jz3MRUS6vhXgN"
         );
     }

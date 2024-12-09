@@ -14,9 +14,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-use ldk_node::bitcoin::{
-    bip32::ExtendedPrivKey, secp256k1::PublicKey, Address, Network, PrivateKey,
-};
+use ldk_node::bitcoin::{bip32::Xpriv, secp256k1::PublicKey, Address, Network, PrivateKey};
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::offers::offer::{Amount, Offer};
 use ldk_node::lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription};
@@ -34,7 +32,7 @@ pub struct InputEval {
 
 pub enum PrivateKeys {
     Pk(PrivateKey),
-    Epk(ExtendedPrivKey),
+    Epk(Xpriv),
     Desc(Descriptor<String>),
 }
 
@@ -112,7 +110,7 @@ impl InputEval {
         }
 
         // extended private key
-        if let Ok(xprv) = ExtendedPrivKey::from_str(&recipient) {
+        if let Ok(xprv) = Xpriv::from_str(&recipient) {
             return Ok(Self {
                 network: InputNetwork::PrivKey(PrivateKeys::Epk(xprv)),
                 satoshis: None,
@@ -607,10 +605,7 @@ mod tests {
         let resp = InputEval::evaluate(inp, "", "").unwrap();
         if let InputNetwork::LightningOffer(offer) = resp.network {
             assert_eq!(inp, offer.to_string());
-            assert_eq!(
-                offer.amount(),
-                Some(Amount::Bitcoin { amount_msats: 9999 }).as_ref()
-            );
+            assert_eq!(offer.amount(), Some(Amount::Bitcoin { amount_msats: 9999 }));
             assert_eq!(
                 offer.description().unwrap().to_string(),
                 "test test test test test test test test test"
