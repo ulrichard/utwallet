@@ -7,5 +7,14 @@
     },
     {
     	"protocol" : "lnurlw"
+    },
+    {
+    	"protocol" : "BITCOIN"
+    },
+    {
+    	"protocol" : "LIGHTNING"
+    },
+    {
+    	"protocol" : "LNURL"
     }
 ]

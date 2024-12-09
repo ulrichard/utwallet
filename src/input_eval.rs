@@ -676,6 +676,19 @@ mod tests {
         assert_eq!(resp.description, "");
     }
 
+    #[test]
+    fn test_lightning_address_ulrichard() {
+        let inp = "ulrichard@sbpc.ch";
+        let resp = InputEval::evaluate(inp, "", "").unwrap();
+        if let InputNetwork::Lightning(invoice) = resp.network {
+            assert_eq!(*"lnbc", invoice.to_string()[..4]);
+        } else {
+            panic!("not recognized as lightning invoice");
+        }
+        assert_eq!(resp.satoshis, Some(1));
+        assert_eq!(resp.description, "Lightning Address Top-up");
+    }
+
     // I didn't want to dox my real card id, as otherwise anybody could block it.
     #[test]
     #[should_panic(expected = "HttpResponse(500)")]
