@@ -1,10 +1,9 @@
 use crate::input_eval::PrivateKeys;
-use bdk::{
-    bitcoin::{Address, Network},
-    blockchain::EsploraBlockchain,
-    database::MemoryDatabase,
-    SignOptions, SyncOptions, Wallet,
-};
+//use bdk::{
+//    blockchain::EsploraBlockchain, database::MemoryDatabase, SignOptions, SyncOptions, Wallet,
+//};
+use bdk_wallet::{KeychainKind, ChangeSet, Wallet};
+use ldk_node::bitcoin::{Address, Network};
 
 pub struct Sweeper {
     pub esplora_url: String,
@@ -43,7 +42,6 @@ impl Sweeper {
         let blockchain = EsploraBlockchain::new(&self.esplora_url, 20);
         wallet
             .sync(&blockchain, SyncOptions::default())
-            .await
             .map_err(|e| format!("Failed to sync sweep wallet: {}", e))?;
 
         if let Ok(bal) = wallet.get_balance() {
