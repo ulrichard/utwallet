@@ -1,6 +1,6 @@
 [package]
 name = "utlnwallet"
-version = "0.0.11"
+version = "0.0.12"
 authors = ["Richard Ulrich <richi+utwallet@ulrichard.ch>"]
 edition = "2021"
 build = "src/build.rs"
@@ -18,7 +18,7 @@ qrcode-png = "0.4"
 chrono = "0.4"
 regex = "1"
 rand_core = "0.6"
-lnurl-rs = "0.5"
+lnurl-rs = "0.9"
 cmc = "0.3"
 electrum2descriptors = "0.7"
 # the following are also dependencies of ldk-node that are not exposed. The versions have to be matched manually

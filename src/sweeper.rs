@@ -199,7 +199,7 @@ mod tests {
         let desc = Descriptor::<String>::from_str(inp).unwrap();
         let desc = Sweeper::descriptors(&PrivateKeys::Desc(desc)).unwrap();
         assert_eq!(desc.len(), 1);
-        let w1 = Wallet::create_single(&desc[0])
+        let w1 = Wallet::create_single(desc[0].to_string())
             .network(Network::Bitcoin)
             .create_wallet_no_persist()
             .map_err(|e| format!("{} - {}", desc[0], e))

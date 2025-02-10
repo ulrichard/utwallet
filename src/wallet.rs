@@ -344,7 +344,7 @@ impl BdkWallet {
         println!("building the ldk-node");
         let mut builder = Builder::new();
         builder.set_network(Network::Bitcoin);
-        builder.set_chain_source_esplora(ESPLORA_SERVERS[1].to_string(), None);
+        builder.set_chain_source_esplora(ESPLORA_SERVERS[0].to_string(), None);
         builder.set_entropy_bip39_mnemonic(mnemonic, None);
         builder.set_storage_dir_path(ldk_dir.to_str().unwrap().to_string());
         builder.set_gossip_source_rgs(RAPID_GOSSIP_SYNC_URL.to_string());
