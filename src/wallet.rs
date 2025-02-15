@@ -259,7 +259,7 @@ impl BdkWallet {
 
     pub fn sweep(privkeys: &PrivateKeys) -> Result<String, String> {
         let sw = crate::sweeper::Sweeper {
-            esplora_url: ESPLORA_SERVERS[0].to_string(),
+            esplora_url: find_working_esplora_server()?,
             network: Network::Bitcoin,
         };
         let rt = tokio::runtime::Runtime::new()
@@ -344,7 +344,7 @@ impl BdkWallet {
         println!("building the ldk-node");
         let mut builder = Builder::new();
         builder.set_network(Network::Bitcoin);
-        builder.set_chain_source_esplora(ESPLORA_SERVERS[0].to_string(), None);
+        builder.set_chain_source_esplora(find_working_esplora_server()?, None);
         builder.set_entropy_bip39_mnemonic(mnemonic, None);
         builder.set_storage_dir_path(ldk_dir.to_str().unwrap().to_string());
         builder.set_gossip_source_rgs(RAPID_GOSSIP_SYNC_URL.to_string());
@@ -359,6 +359,19 @@ impl BdkWallet {
         Ok(node)
     }
 }
+
+fn find_working_esplora_server(
+) -> Result<String, String> {
+    for srv in ESPLORA_SERVERS {
+        let client = esplora_client::Builder::new(srv).build_blocking();
+        if client.get_height().is_ok() {
+            return Ok(srv.to_string());
+        }
+    }
+
+    Err("No working esplora server found".ro_string())
+}
+
 
 fn read_or_generate_mnemonic(mnemonic_file: &Path) -> Result<Mnemonic, String> {
     let mnemonic_words = if mnemonic_file.exists() {
