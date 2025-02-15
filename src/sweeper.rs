@@ -3,7 +3,7 @@ use crate::input_eval::PrivateKeys;
 //    blockchain::EsploraBlockchain, database::MemoryDatabase, SignOptions, SyncOptions, Wallet,
 //};
 use bdk_esplora::{esplora_client, EsploraAsyncExt};
-use bdk_wallet::{KeychainKind, SignOptions, Wallet};
+use bdk_wallet::{SignOptions, Wallet};
 use ldk_node::bitcoin::{Address, Network};
 
 pub struct Sweeper {

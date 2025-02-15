@@ -10,7 +10,7 @@
             "urls" : "dispatcher.json"
         }
     },
-    "version": "0.0.12",
+    "version": "0.0.13",
     "maintainer": "Richard Ulrich <richi+utlnwallet@ulrichard.ch>",
     "framework" : "@CLICK_FRAMEWORK@"
 }
