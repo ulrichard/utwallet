@@ -19,7 +19,7 @@ use qt_core::{q_standard_paths::StandardLocation, QStandardPaths};
 use crate::constants::{ESPLORA_SERVERS, LN_ULR, RAPID_GOSSIP_SYNC_URL};
 use crate::input_eval::PrivateKeys;
 
-use bdk_esplora::{esplora_client, EsploraAsyncExt};
+use bdk_esplora::{esplora_client /*, EsploraAsyncExt*/};
 use ldk_node::bip39::Mnemonic;
 use ldk_node::bitcoin::{secp256k1::PublicKey, Address, Network, Txid};
 use ldk_node::lightning::offers::offer::{Amount, Offer};

@@ -118,6 +118,7 @@ impl Sweeper {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bdk_wallet::KeychainKind;
     use ldk_node::bitcoin::{bip32::Xpriv, PrivateKey};
     use miniscript::Descriptor;
     use rstest::rstest;

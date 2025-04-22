@@ -1,7 +1,7 @@
 pub const ESPLORA_SERVERS: &[&str] = &[
-    "https://blockstream.info/api/",
     "https://ax101.blockeng.ch/",
     "https://ax102.blockeng.ch/",
+    "https://blockstream.info/api/",
 ];
 
 pub const RAPID_GOSSIP_SYNC_URL: &str = "https://rapidsync.lightningdevkit.org/snapshot";

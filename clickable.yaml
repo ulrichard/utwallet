@@ -8,4 +8,4 @@ install_root_data:
 - utlnwallet.apparmor
 - utlnwallet.desktop
 - assets
-rust_channel: "1.79"
+rust_channel: "1.83"

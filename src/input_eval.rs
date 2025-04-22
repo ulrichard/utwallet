@@ -192,7 +192,18 @@ impl InputEval {
 
         // LNURL https://github.com/lnurl/luds
         if recipient.starts_with("https://") {
-            return Self::ln_url(&recipient, satoshis, descr);
+            match Self::ln_url(&recipient, satoshis, descr) {
+                Ok(oo) => {
+                    return Ok(oo);
+                }
+                Err(e) => {
+                    if let Some(ff) = recipient.find("LNURL") {
+                        return InputEval::evaluate(&recipient[ff..], bitcoins, description);
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
         }
 
         // https://coincharge.io/lnurl/
@@ -618,6 +629,32 @@ mod tests {
     #[test]
     fn test_lnurl_https() {
         let inp = "https://opreturnbot.com/.well-known/lnurlp/ben";
+        let resp = InputEval::evaluate(inp, "", "").unwrap();
+        if let InputNetwork::Lightning(invoice) = resp.network {
+            assert_eq!(*"lnbc", invoice.to_string()[..4]);
+        } else {
+            panic!("not recognized as lightning invoice");
+        }
+        assert_eq!(resp.satoshis, Some(1));
+        assert_eq!(resp.description, "");
+    }
+
+    #[test]
+    fn test_lnurl_dfx_spar() {
+        let inp = "https://app.dfx.swiss/pl/?lightning=LNURL1DP68GURN8GHJ7CTSDYHXGENC9EEHW6TNWVHHVVF0D3H82UNVWQHHQMZLX43X2CFNX53K86MR";
+        let resp = InputEval::evaluate(inp, "", "").unwrap();
+        if let InputNetwork::Lightning(invoice) = resp.network {
+            assert_eq!(*"lnbc", invoice.to_string()[..4]);
+        } else {
+            panic!("not recognized as lightning invoice");
+        }
+        assert_eq!(resp.satoshis, Some(1));
+        assert_eq!(resp.description, "");
+    }
+
+    #[test]
+    fn test_lnurl_dfx_test() {
+        let inp = "https://app.dfx.swiss/pl/?lightning=LNURL1DP68GURN8GHJ7CTSDYHXGENC9EEHW6TNWVHHVVF0D3H82UNVWQHHQMZLVFJK2ERYVG6RZCMYX33RVEPEV5YEJ9WT";
         let resp = InputEval::evaluate(inp, "", "").unwrap();
         if let InputNetwork::Lightning(invoice) = resp.network {
             assert_eq!(*"lnbc", invoice.to_string()[..4]);
