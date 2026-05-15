@@ -1,6 +1,6 @@
 clickable_minimum_required: 7.1.2
 builder: rust
-framework: ubuntu-sdk-20.04
+framework: ubuntu-sdk-24.04-1.x
 kill: utlnwallet
 install_root_data:
 - manifest.json
