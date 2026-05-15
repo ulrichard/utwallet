@@ -1,6 +1,6 @@
-clickable_minimum_required: 7.1.2
+clickable_minimum_required: 8.0.0
 builder: rust
-framework: ubuntu-sdk-20.04
+framework: ubuntu-touch-24.04-1.x
 kill: utlnwallet
 install_root_data:
 - manifest.json
@@ -8,4 +8,4 @@ install_root_data:
 - utlnwallet.apparmor
 - utlnwallet.desktop
 - assets
-rust_channel: "1.83"
+rust_channel: "1.90"

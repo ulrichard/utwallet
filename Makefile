@@ -30,8 +30,8 @@ publish:
 	clickable publish --apikey $(shell gpg -d api-key.gpg) --arch arm64
 	clickable build --arch amd64
 	clickable publish --apikey $(shell gpg -d api-key.gpg) --arch amd64
-	clickable build --arch armhf
-	clickable publish --apikey $(shell gpg -d api-key.gpg) --arch armhf
+	#clickable build --arch armhf
+	#clickable publish --apikey $(shell gpg -d api-key.gpg) --arch armhf
 
 logs:
 	clickable logs --arch arm64
@@ -43,3 +43,4 @@ init:
 setup:
 	sudo apt install docker.io adb git python3 python3-pip mesa-utils libgl1-mesa-glx
 	pip3 install --user --break-system-packages --upgrade clickable-ut
+	#pip3 install --user --break-system --upgrade git+https://gitlab.com/clickable/clickable.git@rust-test
